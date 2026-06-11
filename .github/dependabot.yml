@@ -1,0 +1,36 @@
+# ============================================================
+# .github/dependabot.yml — 의존성 자동 업데이트 (공급망 보안)
+# ============================================================
+#
+# Terraform 레포에서 Dependabot이 하는 일:
+#   1. GitHub Actions 버전 추적 (actions/checkout 등이
+#      구버전·취약 버전이 되면 업데이트 PR 자동 생성)
+#   2. Terraform Provider 버전 추적 (aws provider 등)
+#
+# 업데이트 PR도 우리 CI(plan + checkov)를 통과해야 머지
+# → 의존성 업데이트조차 검증 게이트를 거치는 구조
+# ============================================================
+
+version: 2
+updates:
+  # GitHub Actions 의존성 (워크플로우의 uses: 액션들)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  # Terraform Provider 의존성 (스택별)
+  - package-ecosystem: "terraform"
+    directories:
+      - "/00-bootstrap"
+      - "/01-network"
+      - "/02-security"
+      - "/03-workload"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "terraform"
