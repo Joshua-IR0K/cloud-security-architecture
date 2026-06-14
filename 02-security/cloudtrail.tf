@@ -92,6 +92,42 @@ resource "aws_s3_bucket_policy" "cloudtrail" {
   })
 }
 
+resource "aws_s3_bucket_versioning" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  rule {
+    id     = "log-tiering"
+    status = "Enabled"
+    filter {}
+
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+    transition {
+      days          = 90
+      storage_class = "GLACIER"
+    }
+    expiration {
+      days = 365
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
+
 # ── CloudTrail 트레일 ─────────────────────────────────────
 resource "aws_cloudtrail" "main" {
   name           = "${var.project_name}-trail"

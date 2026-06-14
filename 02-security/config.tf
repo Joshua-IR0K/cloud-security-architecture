@@ -99,6 +99,41 @@ resource "aws_s3_bucket_policy" "config" {
   })
 }
 
+resource "aws_s3_bucket_versioning" "config" {
+  bucket = aws_s3_bucket.config.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "config" {
+  bucket = aws_s3_bucket.config.id
+
+  rule {
+    id     = "log-tiering"
+    status = "Enabled"
+    filter {}
+
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+    transition {
+      days          = 90
+      storage_class = "GLACIER"
+    }
+    expiration {
+      days = 365
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
 # ── Config IAM Role ───────────────────────────────────────
 # Config가 리소스 상태를 읽고 S3에 기록하기 위한 역할
 resource "aws_iam_role" "config" {

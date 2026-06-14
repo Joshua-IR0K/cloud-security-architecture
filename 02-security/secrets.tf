@@ -22,6 +22,7 @@
 
 # ── Okta OIDC 자격증명 시크릿 컨테이너 ────────────────────
 resource "aws_secretsmanager_secret" "okta_oidc" {
+  #checkov:skip=CKV2_AWS_57:자동 로테이션 미적용 — Okta는 서드파티 시크릿으로 AWS 네이티브 로테이션 불가(커스텀 Lambda 필요, 현 단계 과잉). 수동 로테이션 정책으로 운영
   name        = "${var.project_name}/okta/oidc"
   description = "Okta OIDC credentials for ALB authentication"
 

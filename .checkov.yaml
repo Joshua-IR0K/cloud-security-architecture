@@ -1,34 +1,38 @@
 # ============================================================
 # .checkov.yaml — Checkov 설정 (레포 루트)
 # ============================================================
-#
-# skip 정책 운영 원칙:
-#   1. 발견사항을 무조건 skip하지 않는다 — 먼저 "수정할 것 vs
-#      의도적 결정으로 수용할 것"을 판단
-#   2. skip은 반드시 사유와 함께 — 두 가지 방법:
-#
-#      방법 A (권장): 코드 인라인 주석 — 사유가 코드 옆에 남음
-#        resource "aws_s3_bucket" "waf_logs" {
-#          #checkov:skip=CKV_AWS_145:WAF 버킷은 us-east-1, 리전 제약으로 KMS 불가 (문서화된 결정)
-#          ...
-#        }
-#
-#      방법 B: 이 파일의 skip-check에 등록 — 전역 정책 제외
-#        (프로젝트 전체에 해당하는 정책만, 사유 주석 필수)
-#
+# skip 운영 원칙:
+#   - 전역 skip(이 파일): 프로젝트 전체 설계 원칙에 따른 제외
+#   - 인라인 skip(#checkov:skip): 개별 리소스의 고유 사유
+#   - 모든 skip은 사유 필수. 연기 항목은 HARDENING_BACKLOG.md로 추적
 # ============================================================
 
 framework:
   - terraform
   - github_actions
 
-# 전역 skip — 프로젝트 전체 설계 원칙에 따른 의도적 제외만 등록
-# (개별 리소스 예외는 코드 인라인 주석 사용)
+# ── 전역 skip — 프로젝트 설계 원칙 ──────────────────────────
 skip-check:
-  # 아직 없음 — 첫 스캔 결과 검토 후 결정
-  # 예시 형식:
-  # - CKV_AWS_144  # S3 교차리전 복제: 포트폴리오 단일리전 설계, FinOps 원칙상 제외
+  # SSM = 비민감 식별자(VPC ID, ARN) 전용, 진짜 시크릿은 Secrets Manager.
+  # 설계 원칙상 String 타입이 맞음 (12개 파라미터 전부 식별자)
+  - CKV2_AWS_34
 
-# 스캔 제외 경로
+  # 단일 리전 설계 + FinOps 원칙 (교차리전 복제 = 저장/전송 비용 2배).
+  # 멀티리전 DR은 Phase 5 Organizations 설계 시 재논의
+  - CKV_AWS_144
+
+  # S3 이벤트 알림 — 소비자(트리거 대상) 없음.
+  # Phase 4C 자동 대응 구축 시 필요 버킷만 선별 적용 예정
+  - CKV2_AWS_62
+
+  # S3 버킷 액세스 로깅 — Datadog SIEM(4A-3) 수집 대상 설계 시
+  # 일괄 결정 (HARDENING_BACKLOG 등재)
+  - CKV_AWS_18
+
+  # CloudTrail → CloudWatch Logs 연동 — 멘토 원칙과 정면 충돌.
+  # S3-only 로깅이 본 아키텍처의 핵심 설계 (CW는 대용량 로그 저장 금지).
+  # 실시간 탐지는 GuardDuty + EventBridge가 CloudTrail을 직접 수신
+  - CKV2_AWS_10
+
 skip-path:
   - .terraform

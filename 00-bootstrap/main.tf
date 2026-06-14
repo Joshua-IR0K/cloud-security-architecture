@@ -89,6 +89,7 @@ data "aws_caller_identity" "current" {}
 # ============================================================
 
 resource "aws_s3_bucket" "terraform_state" {
+  #checkov:skip=CKV_AWS_145:SSE-S3 적용 중. CMK 격상은 CI OIDC 권한 연쇄 설계 필요 — HARDENING_BACKLOG #1, Phase 4C 후 별도 증분
   bucket = "${var.project_name}-terraform-state-${data.aws_caller_identity.current.account_id}"
 
   # ⚠ 절대 삭제 방지
@@ -155,6 +156,7 @@ resource "aws_s3_bucket_public_access_block" "terraform_state" {
 
 # 로그 저장 전용 버킷
 resource "aws_s3_bucket" "terraform_state_log" {
+  #checkov:skip=CKV_AWS_145:SSE-S3 적용 중. 로그 버킷 CMK는 state 버킷 KMS 증분과 함께 처리 — HARDENING_BACKLOG #1
   bucket = "${var.project_name}-tf-state-log-${data.aws_caller_identity.current.account_id}"
 
   lifecycle {
@@ -207,6 +209,36 @@ resource "aws_s3_bucket_versioning" "terraform_state_log" {
   }
 }
 
+# 로그 버킷 라이프사이클 — 액세스 로그는 무한 축적 방지
+# (state 버킷과 달리 로그는 만료시켜도 무방 — 오래된 액세스 로그는 가치 낮음)
+resource "aws_s3_bucket_lifecycle_configuration" "terraform_state_log" {
+  bucket = aws_s3_bucket.terraform_state_log.id
+
+  rule {
+    id     = "log-housekeeping"
+    status = "Enabled"
+    filter {}
+
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+    transition {
+      days          = 90
+      storage_class = "GLACIER"
+    }
+    expiration {
+      days = 365
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
 # state 버킷 → 로그 버킷으로 액세스 로그 전송
 resource "aws_s3_bucket_logging" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
@@ -217,6 +249,25 @@ resource "aws_s3_bucket_logging" "terraform_state" {
   # logging 리소스는 ownership_controls 설정 이후에 생성되어야 함
   depends_on = [aws_s3_bucket_ownership_controls.terraform_state_log]
 }
+
+# state 라이프사이클 — 현재 state는 절대 만료시키지 않음. 구버전만 정리
+resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {
+  bucket = aws_s3_bucket.terraform_state.id
+
+  rule {
+    id     = "state-housekeeping"
+    status = "Enabled"
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = 90   # 90일치 state 이력 보관 (롤백 대비)
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
 
 # ============================================================
 # DynamoDB Lock 테이블

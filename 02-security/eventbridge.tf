@@ -18,6 +18,8 @@
 resource "aws_sns_topic" "security_alerts" {
   name = "${var.project_name}-security-alerts"
 
+  kms_master_key_id = aws_kms_key.logs.arn
+  
   tags = {
     Name = "${var.project_name}-security-alerts"
   }

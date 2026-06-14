@@ -15,7 +15,7 @@
 #   - Trust: StringLike → StringEquals (와일드카드 불필요, 의도 명확화)
 #   - 권한: secretsmanager:GetSecretValue를 특정 시크릿 ARN으로 제한
 #   - 권한: kms:Decrypt를 ViaService 조건으로 제한 (모든 키 → SM 경유만)
-#   - max_session_duration: 3600 → 1800 (최소화)
+#   - max_session_duration: 3600 유지 (AWS IAM Role 최소값이 3600초)
 #   - prevent_destroy 추가 (영속 리소스 보호)
 #   - plan에 실제 필요한 권한 보강 (events, inspector2, sts, s3 read 등)
 #   - thumbprint: 단일 유지 (AWS가 GitHub thumbprint 무시 → 추가 불필요)
@@ -92,7 +92,7 @@ data "aws_iam_policy_document" "github_assume" {
 resource "aws_iam_role" "github_actions_plan" {
   name                 = "${var.project_name}-github-actions-plan"
   assume_role_policy   = data.aws_iam_policy_document.github_assume.json
-  max_session_duration = 3600  # AWS 최소값 (1시간) — IAM Role 하한 제약
+  max_session_duration = 3600 # AWS 최소값 (IAM Role은 3600~43200 범위만 허용)
 
   tags = {
     Name    = "${var.project_name}-github-actions-plan"
@@ -106,6 +106,8 @@ resource "aws_iam_role" "github_actions_plan" {
 
 # ── ④ Plan 전용 권한 정책 ─────────────────────────────────
 data "aws_iam_policy_document" "plan_permissions" {
+  #checkov:skip=CKV_AWS_356:Describe*/List* 류 읽기 API는 리소스 수준 제한 미지원 — 와일드카드 불가피. 쓰기/시크릿 접근은 별도 statement에서 ARN 한정
+  #checkov:skip=CKV_AWS_108:GetSecretValue는 Okta 시크릿 ARN 한정, KMS Decrypt는 ViaService 조건, S3 GetObject는 state 버킷 한정 — 유출 경로 통제됨
 
   # 읽기 — plan은 현재 상태를 읽어 코드와 비교
   # ※ 대부분의 Describe/List API는 리소스 수준 제한을 지원하지 않아
@@ -116,6 +118,8 @@ data "aws_iam_policy_document" "plan_permissions" {
     actions = [
       "sts:GetCallerIdentity",
       "ec2:Describe*",
+      "ec2:GetManagedPrefixListEntries",
+      "ec2:GetManagedPrefixListAssociations",
       "elasticloadbalancing:Describe*",
       "cloudfront:Get*",
       "cloudfront:List*",
@@ -125,33 +129,46 @@ data "aws_iam_policy_document" "plan_permissions" {
       "route53:List*",
       "acm:Describe*",
       "acm:List*",
+      "acm:GetCertificate",
       "iam:Get*",
       "iam:List*",
       "kms:Describe*",
       "kms:List*",
       "kms:GetKeyPolicy",
       "kms:GetKeyRotationStatus",
+      "kms:ListResourceTags",
       "logs:Describe*",
       "logs:Get*",
       "logs:List*",
+      "logs:ListTagsForResource",
       "cloudtrail:Describe*",
       "cloudtrail:Get*",
       "cloudtrail:List*",
+      "cloudtrail:ListTags",
       "guardduty:Get*",
       "guardduty:List*",
       "securityhub:Get*",
       "securityhub:Describe*",
+      "securityhub:ListTagsForResource",
+      "securityhub:ListEnabledProductsForImport",
+      "securityhub:GetEnabledStandards",
       "config:Describe*",
       "config:Get*",
+      "config:ListTagsForResource",
       "inspector2:List*",
       "inspector2:Get*",
       "inspector2:BatchGetAccountStatus",
       "events:Describe*",
       "events:List*",
+      "events:ListTagsForResource",
       "sns:Get*",
       "sns:List*",
       "secretsmanager:DescribeSecret",
-      "secretsmanager:ListSecrets"
+      "secretsmanager:ListSecrets",
+      "secretsmanager:GetResourcePolicy",
+      "wafv2:ListTagsForResource",
+      "elasticloadbalancing:DescribeTags",
+      "tag:GetResources"
     ]
     resources = ["*"]
   }
@@ -163,7 +180,8 @@ data "aws_iam_policy_document" "plan_permissions" {
     actions = [
       "ssm:GetParameter",
       "ssm:GetParameters",
-      "ssm:GetParametersByPath"
+      "ssm:GetParametersByPath",
+      "ssm:ListTagsForResource"
     ]
     resources = [
       "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/*"
@@ -178,6 +196,8 @@ data "aws_iam_policy_document" "plan_permissions" {
   }
 
   # S3 — 로그/State 버킷 구성 조회 (plan이 버킷 속성을 읽음)
+  # 프로젝트 버킷 패턴으로 범위 한정 (CKV_AWS_108 대응)
+  # GetObject/ListBucket은 아래 StateBucketRead에서 state 버킷만 허용
   statement {
     sid    = "S3ReadForPlan"
     effect = "Allow"
@@ -188,12 +208,21 @@ data "aws_iam_policy_document" "plan_permissions" {
       "s3:GetBucketPublicAccessBlock",
       "s3:GetBucketAcl",
       "s3:GetBucketTagging",
-      "s3:GetLifecycleConfiguration",
+      "s3:GetBucketCORS",
+      "s3:GetBucketWebsite",
       "s3:GetBucketLogging",
-      "s3:ListBucket",
-      "s3:GetObject"
+      "s3:GetBucketNotification",
+      "s3:GetBucketObjectLockConfiguration",
+      "s3:GetBucketRequestPayment",
+      "s3:GetAccelerateConfiguration",
+      "s3:GetReplicationConfiguration",
+      "s3:GetLifecycleConfiguration",
+      "s3:GetBucketOwnershipControls"
     ]
-    resources = ["*"] # 로그 버킷 다수 + State 버킷
+    resources = [
+      "arn:aws:s3:::${var.project_name}-*",
+      "arn:aws:s3:::aws-waf-logs-${var.project_name}-*"
+    ]
   }
 
   # State Lock — plan도 lock을 잡으므로 DynamoDB 쓰기 필요

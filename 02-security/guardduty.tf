@@ -20,6 +20,7 @@
 
 # ── GuardDuty 활성화 ──────────────────────────────────────
 resource "aws_guardduty_detector" "main" {
+  #checkov:skip=CKV2_AWS_3:단일 계정 범위 — Organizations 수준 활성화는 Phase 5에서 구성
   enable = true
 
   # Finding 발행 주기: 15분 (가장 빠른 설정)

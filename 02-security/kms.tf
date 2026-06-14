@@ -82,6 +82,20 @@ resource "aws_kms_key" "logs" {
           "kms:DescribeKey"
         ]
         Resource = "*"
+      },
+      {
+        # SNS 토픽 암호화용 — EventBridge가 암호화된 토픽에 발행하려면 필수
+        # ⚠ 이 statement 없이 SNS에 CMK를 걸면 알림이 조용히 실패함 (고전 함정)
+        Sid    = "AllowEventBridgeForSNS"
+        Effect = "Allow"
+        Principal = {
+          Service = "events.amazonaws.com"
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey*"
+        ]
+        Resource = "*"
       }
     ]
   })
