@@ -12,6 +12,7 @@ resource "aws_cloudfront_distribution" "main" {
   #checkov:skip=CKV_AWS_310:Origin failover 미구성 — 단일 ALB 오리진 설계, 멀티 오리진은 과잉 설계
   #checkov:skip=CKV_AWS_305:default root object 미설정 — S3 정적 사이트용 체크, 본 구성은 동적 오리진(nginx가 / 서빙)
   #checkov:skip=CKV_AWS_86:액세스 로깅 보류 — Datadog SIEM(Phase 4A-3) 수집 대상 설계 시 일괄 결정 (HARDENING_BACKLOG)
+  #checkov:skip=CKV2_AWS_32:Checkov 오탐(공식 이슈 #2873,#5597) — AWS 관리형 SecurityHeadersPolicy(67f7725c) 적용됨. 그래프 체크가 관리형 정책 ID 참조를 인식 못 하는 한계
   enabled             = true
   is_ipv6_enabled     = true
   comment             = "DMZ Architecture - Edge Defense with HTTPS"
