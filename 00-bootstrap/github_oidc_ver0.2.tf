@@ -225,6 +225,22 @@ data "aws_iam_policy_document" "plan_permissions" {
     ]
   }
 
+  # State 객체 읽기 — terraform init/plan이 state 파일을 읽음 (GetObject)
+  # ※ S3ReadForPlan에서 GetObject/ListBucket을 분리한 이유:
+  #   객체 읽기는 state 버킷으로만 한정해 데이터 유출 표면 축소 (CKV_AWS_108)
+  statement {
+    sid    = "StateBucketRead"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:ListBucket"
+    ]
+    resources = [
+      aws_s3_bucket.terraform_state.arn,
+      "${aws_s3_bucket.terraform_state.arn}/*"
+    ]
+  }
+
   # State Lock — plan도 lock을 잡으므로 DynamoDB 쓰기 필요
   statement {
     sid    = "StateLock"

@@ -9,6 +9,7 @@
 resource "aws_lb" "main" {
   #checkov:skip=CKV_AWS_150:삭제 보호 미적용 — workload는 FinOps 원칙상 의도적으로 destroy 가능한 임시 스택
   #checkov:skip=CKV_AWS_91:액세스 로깅 보류 — Datadog SIEM(Phase 4A-3) 수집 대상 설계 시 일괄 결정 (HARDENING_BACKLOG)
+  #checkov:skip=CKV2_AWS_28:WAF는 CloudFront에 연결(엣지 방어). ALB는 CloudFront 경유만 허용(Prefix List+X-Origin-Verify)하므로 ALB 직접 WAF 불필요
   name               = "${var.project_name}-alb"
   internal           = false
   load_balancer_type = "application"

@@ -275,6 +275,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {
 # ============================================================
 
 resource "aws_dynamodb_table" "terraform_lock" {
+  #checkov:skip=CKV_AWS_119:Lock 테이블은 잠금 메타데이터(LockID)만 보관, 민감정보 없음. 기본 암호화로 충분 — CMK는 비용/복잡도 대비 효과 없음 (문서화된 결정)
   name         = "${var.project_name}-terraform-lock"
   billing_mode = "PAY_PER_REQUEST" # 온디맨드 — apply 시에만 사용, 사실상 무료
   hash_key     = "LockID"

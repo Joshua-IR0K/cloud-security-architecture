@@ -130,6 +130,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail" {
 
 # ── CloudTrail 트레일 ─────────────────────────────────────
 resource "aws_cloudtrail" "main" {
+  #checkov:skip=CKV_AWS_252:SNS 미연결 — EventBridge가 CloudTrail 이벤트를 직접 수신하는 구조로 중복 경로 불필요
   name           = "${var.project_name}-trail"
   s3_bucket_name = aws_s3_bucket.cloudtrail.id
 
@@ -145,6 +146,8 @@ resource "aws_cloudtrail" "main" {
   # 로그 파일 무결성 검증 — 포렌식 필수
   # 다이제스트 파일로 로그 변조 여부를 검증 가능
   enable_log_file_validation = true
+
+  kms_key_id = aws_kms_key.logs.arn   # ← 이 줄 추가 (CKV_AWS_35)
 
   tags = {
     Name = "${var.project_name}-trail"
