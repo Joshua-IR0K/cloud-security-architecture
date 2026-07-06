@@ -92,8 +92,45 @@ resource "aws_s3_bucket_policy" "cloudtrail" {
   })
 }
 
+resource "aws_s3_bucket_versioning" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  rule {
+    id     = "log-tiering"
+    status = "Enabled"
+    filter {}
+
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+    transition {
+      days          = 90
+      storage_class = "GLACIER"
+    }
+    expiration {
+      days = 365
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
+
 # ── CloudTrail 트레일 ─────────────────────────────────────
 resource "aws_cloudtrail" "main" {
+  #checkov:skip=CKV_AWS_252:SNS 미연결 — EventBridge가 CloudTrail 이벤트를 직접 수신하는 구조로 중복 경로 불필요
   name           = "${var.project_name}-trail"
   s3_bucket_name = aws_s3_bucket.cloudtrail.id
 
@@ -109,6 +146,8 @@ resource "aws_cloudtrail" "main" {
   # 로그 파일 무결성 검증 — 포렌식 필수
   # 다이제스트 파일로 로그 변조 여부를 검증 가능
   enable_log_file_validation = true
+
+  kms_key_id = aws_kms_key.logs.arn   # ← 이 줄 추가 (CKV_AWS_35)
 
   tags = {
     Name = "${var.project_name}-trail"

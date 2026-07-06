@@ -9,6 +9,5 @@ terraform {
     region         = "ap-northeast-2"
     dynamodb_table = "devsecops-project-terraform-lock"
     encrypt        = true
-    profile        = "devsecops-admin"
   }
 }

@@ -7,13 +7,19 @@
 # ============================================================
 
 resource "aws_lb" "main" {
+  #checkov:skip=CKV_AWS_150:삭제 보호 미적용 — workload는 FinOps 원칙상 의도적으로 destroy 가능한 임시 스택
+  #checkov:skip=CKV_AWS_91:액세스 로깅 보류 — Datadog SIEM(Phase 4A-3) 수집 대상 설계 시 일괄 결정 (HARDENING_BACKLOG)
+  #checkov:skip=CKV2_AWS_28:WAF는 CloudFront에 연결(엣지 방어). ALB는 CloudFront 경유만 허용(Prefix List+X-Origin-Verify)하므로 ALB 직접 WAF 불필요
   name               = "${var.project_name}-alb"
   internal           = false
   load_balancer_type = "application"
-  security_groups    = [local.alb_sg_id]         # ← SSM 참조
-  subnets            = local.public_subnet_ids    # ← SSM 참조
+  security_groups    = [local.alb_sg_id]      # ← SSM 참조
+  subnets            = local.public_subnet_ids # ← SSM 참조
 
   enable_deletion_protection = false
+
+  # 비정상 HTTP 헤더 차단 — 헤더 스머글링 방어 (CKV_AWS_131 대응)
+  drop_invalid_header_fields = true
 
   tags = {
     Name = "${var.project_name}-alb"
@@ -21,6 +27,7 @@ resource "aws_lb" "main" {
 }
 
 resource "aws_lb_target_group" "app" {
+  #checkov:skip=CKV_AWS_378:TG HTTP 사용 — TLS는 ALB에서 종료, 내부는 Private Subnet 격리 + X-Origin-Verify. 내부 e2e 암호화는 Phase 4B 재검토
   name     = "${var.project_name}-app-tg"
   port     = var.app_port
   protocol = "HTTP"
@@ -76,7 +83,7 @@ resource "aws_lb_listener" "https" {
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate_validation.alb.certificate_arn
+  certificate_arn   = local.alb_cert_arn
 
   default_action {
     type = "fixed-response"

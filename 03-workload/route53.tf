@@ -1,65 +1,29 @@
 # ============================================================
-# route53.tf — DNS 레코드 관리
+# 03-workload/route53.tf — DNS Alias 레코드
 # ============================================================
 #
-# Route 53에 추가되는 레코드:
-#   1. ACM 인증서 DNS 검증용 CNAME (자동)
-#   2. joshua-devsecops.com → CloudFront Alias (A 레코드)
+# [리팩토링] ACM 검증 레코드는 01-network/acm.tf로 이동
+#   이 파일에는 CloudFront를 가리키는 Alias 레코드만 남김
 #
-# 왜 Alias인가?
+# 왜 Alias 레코드는 workload에 남는가:
+#   레코드의 대상(CloudFront)이 임시 리소스 → "레코드는 자기가
+#   가리키는 리소스와 같은 스택에" 원칙. 영속으로 빼면
+#   영속→임시 참조가 생기고, CloudFront 재생성마다(도메인 변경)
+#   영속 스택 재apply가 강제됨.
+#
+# 왜 Alias인가:
 #   일반 CNAME은 루트 도메인(@)에 사용 불가 (DNS 표준 제약)
-#   Route 53 Alias는 AWS 전용 기능으로 루트 도메인에도 사용 가능
-#   + Alias 쿼리는 Route 53 비용이 무료
-#
+#   Route 53 Alias는 루트 도메인 가능 + 쿼리 비용 무료
 # ============================================================
 
 # ── 기존 Hosted Zone 조회 ─────────────────────────────────
-# Route 53에서 도메인 등록 시 자동 생성된 Hosted Zone을 참조
+# (01-network에도 동일 data가 있으나, data는 조회일 뿐이라 중복 무해)
 data "aws_route53_zone" "main" {
   name         = var.domain_name
   private_zone = false
 }
 
-# ── ACM 인증서 DNS 검증 레코드 ────────────────────────────
-# 두 인증서(CloudFront용 + ALB용)의 검증 레코드를 통합
-# 같은 도메인이므로 검증 레코드가 동일 → 중복 제거
-locals {
-  # CloudFront 인증서와 ALB 인증서의 검증 레코드를 합침
-  cert_validation_options = merge(
-    {
-      for dvo in aws_acm_certificate.cloudfront.domain_validation_options :
-      dvo.domain_name => {
-        name   = dvo.resource_record_name
-        record = dvo.resource_record_value
-        type   = dvo.resource_record_type
-      }
-    },
-    {
-      for dvo in aws_acm_certificate.alb.domain_validation_options :
-      dvo.domain_name => {
-        name   = dvo.resource_record_name
-        record = dvo.resource_record_value
-        type   = dvo.resource_record_type
-      }
-    }
-  )
-}
-
-resource "aws_route53_record" "cert_validation" {
-  for_each = local.cert_validation_options
-
-  zone_id = data.aws_route53_zone.main.zone_id
-  name    = each.value.name
-  type    = each.value.type
-  ttl     = 300
-  records = [each.value.record]
-
-  allow_overwrite = true
-}
-
 # ── 도메인 → CloudFront Alias ─────────────────────────────
-# joshua-devsecops.com → CloudFront Distribution
-# 사용자가 도메인을 입력하면 CloudFront로 라우팅됨
 resource "aws_route53_record" "cloudfront_alias" {
   zone_id = data.aws_route53_zone.main.zone_id
   name    = var.domain_name
@@ -72,7 +36,7 @@ resource "aws_route53_record" "cloudfront_alias" {
   }
 }
 
-# ── www 서브도메인도 CloudFront로 라우팅 ───────────────────
+# ── www 서브도메인 → CloudFront ───────────────────────────
 resource "aws_route53_record" "www_alias" {
   zone_id = data.aws_route53_zone.main.zone_id
   name    = "www.${var.domain_name}"

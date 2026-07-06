@@ -148,6 +148,30 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
+  # Log4Shell(CVE-2021-44228) 등 알려진 악성 입력 차단
+  # 위협 기반 설계: JNDI lookup 패턴 등 명시적 방어 (CKV_AWS_192 대응)
+  rule {
+    name     = "known-bad-inputs"
+    priority = 6
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      sampled_requests_enabled   = true
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.project_name}-known-bad-inputs"
+    }
+  }
+
   visibility_config {
     sampled_requests_enabled   = true
     cloudwatch_metrics_enabled = true

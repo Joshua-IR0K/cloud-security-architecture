@@ -18,6 +18,7 @@ data "aws_ec2_managed_prefix_list" "cloudfront" {
 
 # ── ALB Security Group ─────────────────────────────────────
 resource "aws_security_group" "alb" {
+  #checkov:skip=CKV2_AWS_5:03-workload 스택의 ALB에 연결됨 — 스택 분리 구조를 정적 스캐너가 인식 못 함
   name        = "${var.project_name}-alb-sg"
   description = "ALB Security Group - CloudFront only"
   vpc_id      = aws_vpc.main.id
@@ -77,6 +78,7 @@ resource "aws_security_group_rule" "alb_https_out" {
 
 # ── App (EC2/EKS) Security Group ──────────────────────────
 resource "aws_security_group" "app" {
+  #checkov:skip=CKV2_AWS_5:03-workload 스택의 EC2에 연결됨 — 스택 분리 구조를 정적 스캐너가 인식 못 함
   name        = "${var.project_name}-app-sg"
   description = "App Security Group - Only ALB can reach"
   vpc_id      = aws_vpc.main.id
@@ -118,6 +120,7 @@ resource "aws_security_group_rule" "app_http_out" {
 
 # ── DB Security Group ─────────────────────────────────────
 resource "aws_security_group" "db" {
+  #checkov:skip=CKV2_AWS_5:Phase 4B RDS/EKS 데이터 계층 대비 예약 — 의도적 선행 정의
   name        = "${var.project_name}-db-sg"
   description = "DB Security Group - Only App can reach"
   vpc_id      = aws_vpc.main.id
