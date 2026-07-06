@@ -55,3 +55,9 @@ variable "app_port" {
   type        = number
   default     = 80
 }
+
+
+variable "domain_name" {
+  description = "프로젝트 도메인 (ACM 인증서 + Hosted Zone 조회용)"
+  type        = string
+}

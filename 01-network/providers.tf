@@ -26,3 +26,19 @@ provider "aws" {
     }
   }
 }
+
+# Cloudfront용 인증서 us_east_1 발급 필수(AWS 제약)
+provider "aws" {
+  alias   = "us_east_1"
+  region  = "us-east-1"
+
+  default_tags {
+    tags = {
+      Project     = "devsecops-architecture"
+      Environment = "dev"
+      ManagedBy   = "terraform"
+      Owner       = "joshua"
+      Stack       = "network"
+    }
+  }
+}
