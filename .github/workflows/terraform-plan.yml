@@ -49,7 +49,7 @@ jobs:
 
       # ★ OIDC로 AWS 임시 자격증명 획득 (장기 키 없음)
       - name: Configure AWS Credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}  # Repository Variable 참조
           aws-region: ${{ env.AWS_REGION }}
