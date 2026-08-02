@@ -208,6 +208,41 @@ resource "aws_kms_key" "ebs" {
             "kms:ViaService" = "ec2.${data.aws_region.current.name}.amazonaws.com"
           }
         }
+      },
+      {
+        # ── Phase 4B: EKS 노드그룹 EBS 암호화 (게이트 #1) ──
+        # 노드 인스턴스를 실제로 띄우는 주체는 EKS 가 아니라 AWS 관리 ASG.
+        # SLR 은 AWS 관리 정책이 불변이라 IAM 정책 부착이 불가 →
+        # 키 정책에 Principal 로 직접 명시하는 것이 유일한 인가 경로.
+        # (선행조건: asg_slr.tf 의 서비스연결역할 리소스)
+        Sid    = "AllowASGServiceLinkedRoleUseOfEbsKey"
+        Effect = "Allow"
+        Principal = {
+          AWS = aws_iam_service_linked_role.autoscaling.arn
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+      },
+      {
+        # grant 생성 — AWS 리소스(EBS) 연동 grant 로만 제한 (최소권한)
+        Sid    = "AllowASGServiceLinkedRoleGrants"
+        Effect = "Allow"
+        Principal = {
+          AWS = aws_iam_service_linked_role.autoscaling.arn
+        }
+        Action   = "kms:CreateGrant"
+        Resource = "*"
+        Condition = {
+          Bool = {
+            "kms:GrantIsForAWSResource" = "true"
+          }
+        }
       }
     ]
   })
