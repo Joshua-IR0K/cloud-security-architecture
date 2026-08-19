@@ -109,3 +109,42 @@ variable "lb_controller_chart_version" {
   default     = "1.14.0"
 }
 
+# ── Stage 2: 아이덴티티 마이그레이션 안전 게이트 ──────────
+variable "cni_node_role_policy_attached" {
+  description = <<-EOT
+    노드롤에 AmazonEKS_CNI_Policy 를 유지할지 (기본 true = 안전).
+    라이브 마이그레이션 2단계 절차 (STAGE2_RUNBOOK.md):
+      Phase A (true 유지): CNI 전용 Pod Identity 역할+연결만 추가 —
+        노드롤 grant 와 Pod Identity grant 가 "이중 병존"하는 무해한 과도기.
+        aws-node 재기동 필수 (Pod Identity 는 admission-time 주입이라
+        기존 파드에 소급 적용 안 됨). 검증 게이트 통과 전 false 전환 금지 —
+        확인 전에 detach 하면 과도기 파드가 두 자격 경로를 모두 잃을 수 있음.
+      Phase B (false 전환): 노드롤에서 CNI 정책 실제 detach
+        = "노드롤 축소"의 완성 지점이자 before/after 증거.
+    클린 리빌드(destroy 후 재생성)는 처음부터 false 로 시작해도 안전 —
+      뜬 파드가 없어 소급 문제 자체가 없음. Phase B 후 tfvars 에 false 영구화.
+  EOT
+  type        = bool
+  default     = true
+}
+
+# ── Stage 3: NetworkPolicy 집행 게이트 ────────────────────
+variable "network_policy_enforcement" {
+  description = <<-EOT
+    NetworkPolicy 리소스 생성 여부 (기본 false = 미집행).
+    Stage 2 의 cni_node_role_policy_attached 와 같은 "단계 실증" 게이트 패턴:
+      false → 클러스터는 기본 전면 허용. BEFORE 캡처
+              (파드 간 통신 가능 / 교차 노드 통신 가능)
+      true  → default-deny + 명시 허용만. AFTER 캡처
+    ⚠ 애드온의 enableNetworkPolicy 는 게이트와 무관하게 항상 활성 —
+      "기능 활성화"와 "정책 집행"을 분리해야 before/after 차이가
+      정책만 반영한다.
+    ⚠ 게이트를 켜기 전 EKS 트래픽 가중치를 확인할 것: 정책 오류로
+      ALB 헬스체크가 깨지면 eks=100 상태에선 사이트가 503.
+      실습은 ec2=100 으로 롤백해 두고 진행하는 것을 권장.
+    클린 리빌드 시에는 true 로 두면 처음부터 세그멘테이션 상태로 생성됨
+      (= 코드 정합성 증명, Stage 2 의 false 영구화와 같은 논리).
+  EOT
+  type        = bool
+  default     = false
+}

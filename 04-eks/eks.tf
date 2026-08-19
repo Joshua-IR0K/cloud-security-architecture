@@ -73,6 +73,29 @@ module "eks" {
     kube-proxy = {}
     vpc-cni = {
       before_compute = true
+      # Stage 2 (D8 구현): aws-node 를 노드롤이 아닌 전용 Pod Identity 자격으로.
+      # 애드온 레벨 연결이라 애드온 업데이트로 in-place 반영 —
+      # 단, 기존 aws-node 파드엔 소급 적용 안 됨 → 재기동 필수 (RUNBOOK Phase A)
+      pod_identity_association = [
+        {
+          role_arn        = aws_iam_role.vpc_cni.arn
+          service_account = "aws-node"
+        }
+      ]
+
+      # Stage 3 (D22): native NetworkPolicy 활성화 — Calico 등 3P 미도입.
+      #   컨트롤러는 EKS 컨트롤플레인, 집행은 노드의 network-policy-agent 가
+      #   eBPF 로 커널 레벨 수행. "기능 활성화"일 뿐 정책은 별도
+      #   (network-policy.tf 의 게이트) — 켜도 기본 동작은 전면 허용.
+      # enablePolicyEventLogs: 노드 로컬 로그로 allow/deny 판정 추적.
+      #   enableCloudWatchLogs 는 의도적 미설정 — CW 를 1차 로그 저장소로
+      #   쓰지 않는 프로젝트 원칙 유지 (S3-only).
+      configuration_values = jsonencode({
+        enableNetworkPolicy = "true"
+        nodeAgent = {
+          enablePolicyEventLogs = "true"
+        }
+      })
     }
     eks-pod-identity-agent = {
       before_compute = true
@@ -84,8 +107,6 @@ module "eks" {
     default = {
       ami_type       = "AL2023_x86_64_STANDARD"
       instance_types = [var.node_instance_type]
-
-      vpc_security_group_ids = [local.app_sg_id]
 
       min_size     = var.node_min_size
       max_size     = var.node_max_size
@@ -108,6 +129,16 @@ module "eks" {
         http_put_response_hop_limit = 1
       }
 
+      # ── SG: 모듈 노드 SG + APP SG 병합 (D19) ───────────────
+      # 모듈이 만드는 노드 SG 에 "추가"됨(교체 아님) — 커스텀 LT 의
+      # network_interfaces.security_groups 에 concat 되는 구조.
+      # 이유: ALB SG egress 가 APP SG 를 향하도록 01 에 설계돼 있어(EC2 전제),
+      #   노드가 APP SG 를 함께 달아야 ALB→파드 :80 경로가 열림.
+      #   미부착 시 증상: 타깃 등록은 되는데 헬스체크 Target.Timeout.
+      # ⚠ plan 에서 network_interfaces.security_groups 가 2개인지 확인할 것.
+      #   1개(APP SG만)면 중단 — 노드↔컨트롤플레인 통신이 끊김.
+      vpc_security_group_ids = [local.app_sg_id]
+
       # ── 노드 IAM: SSM Session Manager 접근 경로 ────────────
       # 프라이빗 노드에 SSH 없이 접속하는 운영 경로 (AL2023 = SSM 에이전트 내장).
       # 후반 완전 Private API 전환 시 kubectl 경유지(B-1 논의)의 기반이기도 함.
@@ -115,6 +146,11 @@ module "eks" {
         ssm = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
       }
 
+      # ── Stage 2 게이트: 노드롤의 CNI 정책 (2단계 detach) ──
+      # 모듈 기본값(true)은 AmazonEKS_CNI_Policy 를 노드롤에 자동 부착 —
+      # S1 은 이를 암묵적으로 상속하고 있었음. Phase A(병존)에선 true 유지,
+      # Phase B 에서 false 로 flip = 실제 detach (변수 설명·RUNBOOK 참고).
+      iam_role_attach_cni_policy = var.cni_node_role_policy_attached
 
       # ── EBS: 02-security ebs CMK 암호화 (게이트 #1) ────────
       # kms_key_id 미지정 시 aws/ebs(AWS 관리키)로 암호화됨 — 자체 키로 지정해
