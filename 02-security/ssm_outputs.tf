@@ -46,3 +46,12 @@ resource "aws_ssm_parameter" "okta_secret_arn" {
 
   tags = { Name = "${var.project_name}-okta-secret-arn" }
 }
+
+# ── secrets KMS 키 ARN ──
+resource "aws_ssm_parameter" "secrets_kms_key_arn" {
+  name  = "/${var.project_name}/security/secrets_kms_key_arn"
+  type  = "String"
+  value = aws_kms_key.secrets.arn
+
+  tags = { Name = "${var.project_name}-secrets_kms_key_arn" }
+}

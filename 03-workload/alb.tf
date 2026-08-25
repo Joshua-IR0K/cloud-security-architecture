@@ -122,9 +122,32 @@ resource "aws_lb_listener_rule" "oidc_auth" {
     }
   }
 
+  # ── Phase 4B B-2: weighted forward (EC2 blue / EKS green 컷오버) ──
+  # 기존 in-place forward → weighted forward. EKS TG 를 weight 0 으로 미리
+  # 넣어두면 빈 TG flip race(502) 원천 차단. 컷오버는 weight 만으로 제어.
+  # (선행: eks_target_group.tf 의 aws_lb_target_group.eks +
+  #        variables_cutover.tf 의 weight 변수 2개)
   action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.app.arn
+    type = "forward"
+
+    forward {
+      target_group {
+        arn    = aws_lb_target_group.app.arn   # EC2 (blue)
+        weight = var.ec2_traffic_weight        # 기본 100
+      }
+
+      target_group {
+        arn    = aws_lb_target_group.eks.arn   # EKS (green)
+        weight = var.eks_traffic_weight        # 기본 0
+      }
+
+      # 컷오버는 명시적 weight 로만 제어 → 세션 고정 불필요.
+      # duration 은 enabled=false 여도 필수 인자라 1.
+      stickiness {
+        enabled  = false
+        duration = 1
+      }
+    }
   }
 
   condition {
