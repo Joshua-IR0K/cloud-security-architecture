@@ -41,6 +41,14 @@ data "aws_ssm_parameter" "public_subnet_ids" {
   name = "/${var.project_name}/network/public_subnet_ids"
 }
 
+
+# ── Stage 5: 02-security (영속) — 자체 ECR repository URL ──
+# S5 BUILD 에서 public nginx 를 자체 빌드 ECR image 로 교체한다.
+# URL 만 SSM 으로 계약하고 02 state 전체를 참조하지 않는다.
+data "aws_ssm_parameter" "ecr_repository_url" {
+  name = "/${var.project_name}/security/ecr_repository_url"
+}
+
 data "aws_subnet" "public" {
   for_each = toset(split(",", nonsensitive(data.aws_ssm_parameter.public_subnet_ids.value)))
   id       = each.value
@@ -57,4 +65,5 @@ locals {
   eks_tg_arn          = nonsensitive(data.aws_ssm_parameter.eks_tg_arn.value)
   alb_sg_id           = nonsensitive(data.aws_ssm_parameter.alb_sg_id.value)
   public_subnet_cidrs = [for s in data.aws_subnet.public : s.cidr_block]
+  ecr_repository_url  = nonsensitive(data.aws_ssm_parameter.ecr_repository_url.value)
 }

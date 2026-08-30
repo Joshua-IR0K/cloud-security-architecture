@@ -1,5 +1,5 @@
 # ============================================================
-# 05-k8s/workload.tf — Walking Skeleton 워크로드 (nginx + TGB)
+# 05-k8s/workload.tf — 워크로드 (nginx + TGB)
 # ============================================================
 #
 # 리소스 타입 배분 원칙 (B-1):
@@ -7,34 +7,20 @@
 #   TargetGroupBinding = kubectl_manifest (유일한 CRD —
 #     HashiCorp kubernetes_manifest 는 plan 시점 CRD 요구로 fresh apply 불가)
 #
-# Stage 6 에서 이 워크로드 관리는 GitHub Actions 파이프라인으로 이관 예정
+# Stage 5 소유권:
+#   Terraform 이 Deployment 전체(컨테이너 image 포함)를 계속 소유한다.
+#   사람이 로컬 골든패스로 만든 ECR artifact tag 를 app_image_tag 로 명시해 배포한다.
+#   image 필드 위임(ignore_changes)은 Stage 6 D42 에서만 도입한다.
 # ============================================================
 
-# ── 검증 차별화 페이지 (U3 대응) ──────────────────────────
-# EC2 스켈레톤도 기본 nginx 페이지라, 컷오버 후 브라우저에 기본 페이지가
-# 떠도 "어느 쪽이 응답했는지" 증명 불가. EKS 쪽 index 를 차별화해
-# ④ weight 전환의 성공/롤백을 눈으로 판정 가능하게 만듦.
-# ($hostname 은 nginx SSI 없이는 동적 삽입이 번거로워 정적 텍스트로 충분 —
-#  파드 단위 식별은 kubectl logs 의 액세스 로그로)
-resource "kubernetes_config_map_v1" "nginx_index" {
-  metadata {
-    name      = "nginx-index"
-    namespace = "default"
-  }
-
-  data = {
-    "index.html" = <<-HTML
-      <!DOCTYPE html>
-      <html>
-      <head><title>EKS Walking Skeleton</title></head>
-      <body style="font-family: monospace; background:#0b1120; color:#7dd3fc; padding:3rem;">
-        <h1>Served from EKS — Phase 4B Stage 1</h1>
-        <p>nginx pod behind existing ALB (Okta OIDC + X-Origin-Verify + WAF + CloudFront preserved)</p>
-      </body>
-      </html>
-    HTML
-  }
-}
+# ⚠ nginx_index ConfigMap 제거 (P1-6)
+#   ConfigMap 이 /usr/share/nginx/html 을 마운트하면 이미지가 가진 콘텐츠를
+#   통째로 가린다. 그러면 HTTPS 응답으로 "어느 커밋의 이미지가 도는지"를
+#   확인할 수 없어 E2E 증거 사슬이 끊긴다.
+#     Docker Image → application artifact  (콘텐츠 소유)
+#     ConfigMap    → runtime configuration (필요해지면 conf.d 에 마운트)
+#   S1~S5 에서 이 ConfigMap 이 하던 "Served from EKS" 차별화 역할은
+#   이제 이미지 안의 index.html(빌드 SHA 포함)이 대신한다.
 
 resource "kubernetes_deployment_v1" "nginx" {
   metadata {
@@ -64,14 +50,14 @@ resource "kubernetes_deployment_v1" "nginx" {
       spec {
         container {
           name = "nginx"
-          # 가변 태그 사용은 Stage 1 한정 (공식 이미지, 존재 보장 목적)
-          # → Stage 5(ECR)부터 자체 빌드 이미지, Stage 7 에서
-          #   digest 고정 + cosign 서명 검증으로 대체 (로드맵 확정)
-          # ECR Public 미러 사용 이유: Docker Hub 익명 pull 은 IP 당
-          # rate limit — 모든 pull 이 단일 NAT IP 로 나가는 이 구조에서
-          # destroy/apply 사이클 반복 시 ImagePullBackOff 로 발현될 수
-          # 있는 노출면. ECR Public 은 AWS 발신 트래픽에 관대함.
-          image = "public.ecr.aws/docker/library/nginx:stable-alpine"
+          # Stage 5: public base image를 직접 실행하지 않고, 로컬 골든패스가
+          # 빌드·Trivy 검증·ECR push 한 자체 artifact를 실행한다.
+          # Stage 5: 공용 레지스트리 → 우리 ECR
+          #   노드롤에 AmazonEC2ContainerRegistryReadOnly 가 이미 있어
+          #   추가 IAM 작업 없이 pull 가능 (S2 detach 때 보존된 권한).
+          #   ⚠ 리포지토리가 IMMUTABLE — 재빌드 시 새 태그 + var 갱신 필요.
+          #   S7 에서 digest 핀 + cosign 서명 검증으로 대체.
+          image = "${local.ecr_repository_url}:${var.app_image_tag}"
 
           port {
             container_port = 80
@@ -97,24 +83,12 @@ resource "kubernetes_deployment_v1" "nginx" {
             period_seconds        = 5
           }
 
-          # ConfigMap index 마운트 — /usr/share/nginx/html 전체가
-          # ConfigMap 내용(index.html)으로 대체됨. 헬스체크 "/" 도 이 페이지로 200.
-          volume_mount {
-            name       = "index-html"
-            mount_path = "/usr/share/nginx/html"
-            read_only  = true
-          }
         }
 
-        volume {
-          name = "index-html"
-          config_map {
-            name = kubernetes_config_map_v1.nginx_index.metadata[0].name
-          }
-        }
       }
     }
   }
+
 }
 
 resource "kubernetes_service_v1" "nginx" {

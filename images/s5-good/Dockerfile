@@ -37,6 +37,21 @@ LABEL org.opencontainers.image.title="s5-good" \
       org.opencontainers.image.description="Phase 4B Stage 5 golden image" \
       org.opencontainers.image.vendor="joshua-devsecops"
 
+# ── 애플리케이션 콘텐츠는 "이미지"가 소유한다 (P1-6) ──────
+# 기존에는 K8s ConfigMap 이 /usr/share/nginx/html 을 마운트해 이미지의
+# index.html 을 통째로 가렸다. 그러면 HTTPS 응답으로 "어느 커밋의 이미지가
+# 도는지" 확인할 수 없어 E2E 증거 사슬(commit → image → pod → response)이 끊긴다.
+#   Docker Image → application artifact
+#   ConfigMap    → runtime configuration
+# 이 분리를 지키기 위해 05-k8s 의 ConfigMap 마운트를 제거했다.
 COPY index.html /usr/share/nginx/html/index.html
+
+# ── build identity 각인 (P1-6) ────────────────────────────
+# 이미지가 애플리케이션 콘텐츠를 소유하고, 어느 커밋의 산출물인지 페이지에 새긴다.
+# → HTTPS 응답만 보고 Git commit → build → ECR → Deployment → Pod 가 연결됨을 확인.
+#   (ConfigMap 이 html 을 마운트하면 이 값이 가려지므로 마운트를 제거했다)
+# 로컬 빌드는 기본값 "local", CI 는 --build-arg BUILD_SHA=<github.sha>
+ARG BUILD_SHA=local
+RUN sed -i "s|__BUILD_SHA__|${BUILD_SHA}|g" /usr/share/nginx/html/index.html
 
 EXPOSE 80

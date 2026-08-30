@@ -4,7 +4,7 @@
 # ★ 게이트 분리(스택 분리의 부수 효과):
 #   cni_node_role_policy_attached → 04-eks (AWS 평면 = IAM)
 #   network_policy_enforcement    → 05-k8s (K8s 평면 = 정책 리소스)
-#   프로파일도 각 스택의 tfvars/ 에 따로 존재한다.
+#   현재 final bundle은 실제 적용값을 terraform.tfvars 또는 명시적 -var 로 전달한다.
 # ============================================================
 
 variable "region" {
@@ -62,4 +62,21 @@ variable "secrets_store_driver_version" {
   EOT
   type        = string
   default     = "1.5.4"
+}
+
+
+# ============================================================
+# Stage 5 — application artifact
+# ============================================================
+variable "app_image_tag" {
+  description = <<-EOT
+    Stage 5 에서 사람이 Trivy gate + ECR push 를 완료한 **검증 대상 image tag**.
+    S5 는 Terraform 이 image 필드까지 소유하므로 매 apply 시 명시적으로 전달한다.
+    예: -var 'app_image_tag=s5-good-<git-sha>'
+
+    의도적으로 default 를 두지 않는다. 아직 검증하지 않은 임의 tag로 조용히
+    기동하는 것보다, S5 골든패스가 만든 artifact 를 명시적으로 선택하게 한다.
+    Stage 6 에서 이 변수는 D43 bootstrap baseline 의미로 재정의된다.
+  EOT
+  type = string
 }

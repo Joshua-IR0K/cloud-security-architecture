@@ -168,7 +168,14 @@ data "aws_iam_policy_document" "plan_permissions" {
       "secretsmanager:GetResourcePolicy",
       "wafv2:ListTagsForResource",
       "elasticloadbalancing:DescribeTags",
-      "tag:GetResources"
+      "tag:GetResources",
+      # Stage 5: 02-security ECR repository/lifecycle refresh
+      "ecr:DescribeRepositories",
+      "ecr:DescribeImages",
+      "ecr:GetLifecyclePolicy",
+      "ecr:GetRepositoryPolicy",
+      "ecr:GetRegistryScanningConfiguration",
+      "ecr:ListTagsForResource"
     ]
     resources = ["*"]
   }

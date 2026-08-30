@@ -60,7 +60,7 @@ Write-Host "     repo    = $repoUrl"
 # ── 1. 태그 결정 ──────────────────────────────────────────
 # latest 를 쓰지 않는다: 어떤 커밋의 산출물인지 식별할 수 없고,
 # IMMUTABLE 리포지토리에서 재사용이 불가능하며, S6/S7 의 태그 진화와 어긋난다.
-#   S5: s5-<variant>-<git sha>   S6: <GITHUB_SHA>   S7: digest + 서명
+#   S5: s5-<variant>-<git sha>   S6: s6-<full GITHUB_SHA>   S7: digest + 서명
 if ([string]::IsNullOrWhiteSpace($Tag)) {
   $sha = (& git rev-parse --short HEAD 2>$null)
   if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sha)) { $sha = "nogit" }
@@ -81,9 +81,13 @@ Step "빌드 대상: $image  (context: $context)"
 #   실제 이미지는 태그가 없어서(SUCCESSFUL, tag=null) 콘솔·CLI 모두에서
 #   "태그별 취약점"이 보이지 않는다. 스캔은 됐는데 연결이 끊기는 것.
 #   → Stage 5 의 목적(태그별 스캔 결과 대비)을 위해 단일 매니페스트로 푸시한다.
-#   → attestation 은 S6 에서 SBOM(Syft)과 함께 "의도적으로" 도입한다.
+#   → S6 는 Syft로 digest 기준 SBOM을 별도 생성·보존하고, OCI attestation/서명은 S7로 미룬다.
 Step "docker buildx build"
-& docker buildx build --platform linux/amd64 --provenance=false --sbom=false --load -t $image $context
+# --build-arg: 페이지에 빌드 identity 를 굽는다(P1-6) — 로컬 빌드는 git sha 사용
+$buildSha = (& git rev-parse HEAD 2>$null); if ($LASTEXITCODE -ne 0) { $buildSha = "local" }
+& docker buildx build --platform linux/amd64 --provenance=false --sbom=false `
+    --build-arg "BUILD_SHA=$buildSha" `
+    --load -t $image $context
 if ($LASTEXITCODE -ne 0) { throw "[s5] 빌드 실패" }
 
 # ── 3. Trivy 게이트 (빌드타임, shift-left) ────────────────
@@ -123,7 +127,11 @@ if ($pushExit -ne 0) {
 
 # ── 6. 결과 ───────────────────────────────────────────────
 Step "푸시 완료 — digest 확인"
-& aws ecr describe-images --repository-name (($repoUrl -split "/")[-1]) `
+# registry host 뒤의 전체 path가 ECR repository name이다.
+# 예: 123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/devsecops-project/app
+#     -> devsecops-project/app (마지막 "app" 만 쓰면 조회 실패)
+$repoName = $repoUrl.Substring($repoUrl.IndexOf("/") + 1)
+& aws ecr describe-images --repository-name $repoName `
     --image-ids imageTag=$Tag `
     --query "imageDetails[].{tag:imageTags[0],digest:imageDigest,pushed:imagePushedAt,size:imageSizeInBytes}"
 

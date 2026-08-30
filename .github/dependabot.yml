@@ -29,6 +29,8 @@ updates:
       - "/01-network"
       - "/02-security"
       - "/03-workload"
+      - "/04-eks"
+      - "/05-k8s"
     schedule:
       interval: "weekly"
     labels:
