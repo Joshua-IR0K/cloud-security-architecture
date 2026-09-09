@@ -175,7 +175,10 @@ data "aws_iam_policy_document" "plan_permissions" {
       "ecr:GetLifecyclePolicy",
       "ecr:GetRepositoryPolicy",
       "ecr:GetRegistryScanningConfiguration",
-      "ecr:ListTagsForResource"
+      "ecr:ListTagsForResource",
+      # Stage 6: 02-security CodeBuild project/webhook refresh
+      "codebuild:BatchGetProjects",
+      "codebuild:ListProjects"
     ]
     resources = ["*"]
   }

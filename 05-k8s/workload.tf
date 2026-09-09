@@ -7,10 +7,11 @@
 #   TargetGroupBinding = kubectl_manifest (유일한 CRD —
 #     HashiCorp kubernetes_manifest 는 plan 시점 CRD 요구로 fresh apply 불가)
 #
-# Stage 5 소유권:
-#   Terraform 이 Deployment 전체(컨테이너 image 포함)를 계속 소유한다.
-#   사람이 로컬 골든패스로 만든 ECR artifact tag 를 app_image_tag 로 명시해 배포한다.
-#   image 필드 위임(ignore_changes)은 Stage 6 D42 에서만 도입한다.
+# 소유권 (D42 Delegated Field Ownership) — "이관"이 아니다:
+#   Terraform : 이 Deployment 의 구조·보안 전체를 계속 소유
+#               (replica·probe·볼륨·SA·securityContext·Service·TGB)
+#   CI        : 컨테이너 image 필드 **하나만** 위임받음(ignore_changes)
+#   → 워크로드 전체가 파이프라인으로 넘어가는 것이 아니다.
 # ============================================================
 
 # ⚠ nginx_index ConfigMap 제거 (P1-6)
@@ -50,8 +51,13 @@ resource "kubernetes_deployment_v1" "nginx" {
       spec {
         container {
           name = "nginx"
-          # Stage 5: public base image를 직접 실행하지 않고, 로컬 골든패스가
-          # 빌드·Trivy 검증·ECR push 한 자체 artifact를 실행한다.
+          # 가변 태그 사용은 Stage 1 한정 (공식 이미지, 존재 보장 목적)
+          # → Stage 5(ECR)부터 자체 빌드 이미지, Stage 7 에서
+          #   digest 고정 + cosign 서명 검증으로 대체 (로드맵 확정)
+          # ECR Public 미러 사용 이유: Docker Hub 익명 pull 은 IP 당
+          # rate limit — 모든 pull 이 단일 NAT IP 로 나가는 이 구조에서
+          # destroy/apply 사이클 반복 시 ImagePullBackOff 로 발현될 수
+          # 있는 노출면. ECR Public 은 AWS 발신 트래픽에 관대함.
           # Stage 5: 공용 레지스트리 → 우리 ECR
           #   노드롤에 AmazonEC2ContainerRegistryReadOnly 가 이미 있어
           #   추가 IAM 작업 없이 pull 가능 (S2 detach 때 보존된 권한).
@@ -89,6 +95,36 @@ resource "kubernetes_deployment_v1" "nginx" {
     }
   }
 
+  # ── Delegated Field Ownership (D42) ───────────────────────
+  # 컨테이너 이미지 필드의 소유권을 CI 에 명시적으로 위임한다.
+  #
+  # 왜 필요한가:
+  #   CI 가 05 전체를 terraform apply 하면
+  #     ① Helm release state(kube-system Secret) 읽기 권한이 필요해지고
+  #     ② tfvars 누락 시 NetworkPolicy 등 보안 통제를 파괴할 수 있다
+  #   → 배포 하나를 위해 플랫폼/보안 통제의 소유권을 CI 에 넘기는 셈.
+  #
+  # 대신 Terraform 은 Deployment 의 "구조와 보안"(replica·probe·볼륨·SA·
+  # securityContext)을 계속 소유하고, CI 는 "실행할 아티팩트"(image) 하나만
+  # 소유한다. CI 의 K8s 권한은 이 Deployment 의 get/patch 로 축소된다.
+  #
+  # 이것은 drift 방치가 아니다:
+  #   drift = 코드에 없는 변경이 조용히 발생하는 것
+  #   위임 = 어느 필드를 누가 소유하는지 코드에 선언하는 것
+  #   → "코드에 없으면 존재하지 않는다"의 예외가 아니라, 예외 자체가 코드에 있다.
+  #   → 프로젝트 내 두 번째 적용: EKS 모듈이 같은 이유로 desired_size 를
+  #     ignore 하고 우리가 그것을 D6 로 수용했다.
+  #
+  # 동작 메커니즘:
+  #   refresh 가 실제 값(CI 가 설정한 이미지)을 state 로 읽고,
+  #   plan 은 ignore 대상에 config 대신 prior state 를 쓴다
+  #   → Terraform 이 다른 필드를 고쳐도 CI 의 이미지는 유지된다.
+  #   ⚠ 단 "생성" 시점에는 config 가 적용된다 → var.app_image_tag 의 baseline 의미(D43)
+  lifecycle {
+    ignore_changes = [
+      spec[0].template[0].spec[0].container[0].image
+    ]
+  }
 }
 
 resource "kubernetes_service_v1" "nginx" {

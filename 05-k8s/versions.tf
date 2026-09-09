@@ -17,13 +17,13 @@ terraform {
 
   required_providers {
     aws = {
-      source  = "hashicorp/aws"
+      source = "hashicorp/aws"
       # >= 6.50: 04 와 통일 (Secrets Manager write-only 관련 수정 포함)
       version = ">= 6.50, < 7.0"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
-      version = "~> 2.38"
+      version = "~> 3.2.1"
     }
     helm = {
       source  = "hashicorp/helm"
