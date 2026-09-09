@@ -162,3 +162,11 @@ resource "aws_ssm_parameter" "images_kms_key_arn" {
 
   tags = { Name = "${var.project_name}-images-kms-key-arn" }
 }
+
+resource "aws_ssm_parameter" "ecr_repository_arn" {
+  name  = "/${var.project_name}/security/ecr_repository_arn"
+  type  = "String"
+  value = aws_ecr_repository.app.arn
+  
+  tags  = { Name = "${var.project_name}-ecr-repository-arn" }
+}

@@ -13,8 +13,18 @@
 #         S6 의 목적은 CI/CD 보안이지 러너 플릿 운영이 아니다.
 #
 # 채택: CodeBuild-hosted GitHub Actions 러너 (VPC 연결, job 단위 ephemeral)
-#   ★ D37 보존: codebuild_runner_enabled=false가 기본이라 S6-A에서는 이 실패 도메인을 생성하지 않는다.
-#     S6-B 진입 시 CodeConnection 준비 후 true로 전환한다.
+#   ⚠ count 게이트 제거 (2026-09) — 원래 D37(S6-A/B 분리)에 따라
+#     codebuild_runner_enabled=false 를 기본으로 두어 S6-A 에서 이 실패 도메인을
+#     생성하지 않도록 했다. 그러나 **게이트의 목적은 CodeConnections 승인 전에
+#     리소스를 만들지 않는 것**이었고, 승인이 끝난 시점에 그 목적은 소멸했다.
+#
+#     남겨두면 순수한 위험이 된다 — `-var` 를 빠뜨리면 count=0 이 되어
+#     **에러가 아니라 리소스 삭제**로 나타난다. 실제로 러너가 조용히 사라져
+#     AWS 에도 state 에도 남지 않은 상태를 발견했다(재생성으로 복구).
+#     → 게이트는 목적이 살아있을 때만 유지하고, 소멸하면 제거한다.
+#     → `terraform apply` 만으로 완결되게 하여 플래그 누락 경로 자체를 없앤다.
+#       (#10 의 교훈 "apply 에 조건을 붙이면 그래프가 불완전해지고 그것이
+#        조용히 지나간다" 와 같은 계열)
 #   GitHub Actions = 워크플로 엔진 (그대로)
 #   CodeBuild      = EKS 프라이빗 API 에 닿기 위한 배포 job 전용 컴퓨트
 #   → 별도 CI 제품으로 키우지 않는다. runs-on 한 줄만 바뀐다.
@@ -33,22 +43,19 @@
 # ============================================================
 
 data "aws_ssm_parameter" "private_subnet_ids_for_runner" {
-  count = var.codebuild_runner_enabled ? 1 : 0
   name = "/${var.project_name}/network/private_subnet_ids"
 }
 
 data "aws_ssm_parameter" "vpc_id_for_runner" {
-  count = var.codebuild_runner_enabled ? 1 : 0
   name = "/${var.project_name}/network/vpc_id"
 }
 
 # ── 러너용 보안그룹: 아웃바운드 전용 ────────────────────────
 # 인바운드 0 — 러너는 GitHub 에서 job 을 받아오는 쪽(아웃바운드)이다.
 resource "aws_security_group" "codebuild_runner" {
-  count       = var.codebuild_runner_enabled ? 1 : 0
   name        = "${var.project_name}-codebuild-runner"
   description = "Ephemeral GitHub Actions runner for EKS deploy (egress only)"
-  vpc_id      = nonsensitive(data.aws_ssm_parameter.vpc_id_for_runner[0].value)
+  vpc_id      = nonsensitive(data.aws_ssm_parameter.vpc_id_for_runner.value)
 
   egress {
     description = "HTTPS to EKS API, ECR, GitHub, AWS APIs (via NAT)"
@@ -68,7 +75,6 @@ resource "aws_security_group" "codebuild_runner" {
 #   두 신원을 분리하는 것이 이 설계의 핵심 — 러너 컴퓨트가 침해돼도
 #   그 자체로는 클러스터에 아무 권한이 없다.
 data "aws_iam_policy_document" "codebuild_runner_trust" {
-  count = var.codebuild_runner_enabled ? 1 : 0
   statement {
     effect  = "Allow"
     actions = ["sts:AssumeRole"]
@@ -80,15 +86,13 @@ data "aws_iam_policy_document" "codebuild_runner_trust" {
 }
 
 resource "aws_iam_role" "codebuild_runner" {
-  count              = var.codebuild_runner_enabled ? 1 : 0
   name               = "${var.project_name}-codebuild-runner"
-  assume_role_policy = data.aws_iam_policy_document.codebuild_runner_trust[0].json
+  assume_role_policy = data.aws_iam_policy_document.codebuild_runner_trust.json
 
   tags = { Name = "${var.project_name}-codebuild-runner" }
 }
 
 data "aws_iam_policy_document" "codebuild_runner" {
-  count = var.codebuild_runner_enabled ? 1 : 0
   # 로그
   statement {
     sid    = "Logs"
@@ -142,7 +146,7 @@ data "aws_iam_policy_document" "codebuild_runner" {
       test     = "ArnEquals"
       variable = "ec2:Subnet"
       values = [
-        for id in split(",", nonsensitive(data.aws_ssm_parameter.private_subnet_ids_for_runner[0].value)) :
+        for id in split(",", nonsensitive(data.aws_ssm_parameter.private_subnet_ids_for_runner.value)) :
         "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:subnet/${id}"
       ]
     }
@@ -172,20 +176,18 @@ data "aws_iam_policy_document" "codebuild_runner" {
 }
 
 resource "aws_iam_role_policy" "codebuild_runner" {
-  count  = var.codebuild_runner_enabled ? 1 : 0
   name   = "${var.project_name}-codebuild-runner"
-  role   = aws_iam_role.codebuild_runner[0].id
-  policy = data.aws_iam_policy_document.codebuild_runner[0].json
+  role   = aws_iam_role.codebuild_runner.id
+  policy = data.aws_iam_policy_document.codebuild_runner.json
 }
 
 # ── CodeBuild 프로젝트 (러너 모드) ─────────────────────────
 # source = GITHUB + CODECONNECTIONS. WORKFLOW_JOB_QUEUED webhook이 job을 기동한다.
 # buildspec은 러너 모드에서 형식상 존재하며 실제 job 내용은 GitHub Actions가 결정한다.
 resource "aws_codebuild_project" "gha_runner" {
-  count         = var.codebuild_runner_enabled ? 1 : 0
   name          = "${var.project_name}-gha-deploy-runner"
   description   = "Ephemeral GitHub Actions runner for EKS deploy jobs (S6-B)"
-  service_role  = aws_iam_role.codebuild_runner[0].arn
+  service_role  = aws_iam_role.codebuild_runner.arn
   build_timeout = 20
 
   artifacts { type = "NO_ARTIFACTS" }
@@ -226,9 +228,9 @@ resource "aws_codebuild_project" "gha_runner" {
 
   # ★ VPC 연결 — 이것이 이 리소스의 존재 이유
   vpc_config {
-    vpc_id             = nonsensitive(data.aws_ssm_parameter.vpc_id_for_runner[0].value)
-    subnets            = split(",", nonsensitive(data.aws_ssm_parameter.private_subnet_ids_for_runner[0].value))
-    security_group_ids = [aws_security_group.codebuild_runner[0].id]
+    vpc_id             = nonsensitive(data.aws_ssm_parameter.vpc_id_for_runner.value)
+    subnets            = split(",", nonsensitive(data.aws_ssm_parameter.private_subnet_ids_for_runner.value))
+    security_group_ids = [aws_security_group.codebuild_runner.id]
   }
 
   logs_config {
@@ -244,8 +246,7 @@ resource "aws_codebuild_project" "gha_runner" {
 # ★ 필터가 WORKFLOW_JOB_QUEUED 여야 한다. 다른 이벤트 타입이면
 #   job 이 큐에서 영원히 움직이지 않는다(가장 흔한 함정).
 resource "aws_codebuild_webhook" "gha_runner" {
-  count        = var.codebuild_runner_enabled ? 1 : 0
-  project_name = aws_codebuild_project.gha_runner[0].name
+  project_name = aws_codebuild_project.gha_runner.name
   build_type   = "BUILD"
 
   filter_group {
@@ -261,33 +262,35 @@ resource "aws_codebuild_webhook" "gha_runner" {
 # 프라이빗 서브넷 배치만으로는 API 에 도달하지 않는다 —
 # #13(노드 SG self-ingress 부재)과 같은 계열: "네트워크 배치 ≠ 도달 가능성".
 resource "aws_ssm_parameter" "codebuild_runner_sg_id" {
-  count       = var.codebuild_runner_enabled ? 1 : 0
   name        = "/${var.project_name}/security/codebuild_runner_sg_id"
   description = "CodeBuild deploy runner SG — consumed by 04-eks for cluster SG ingress"
   type        = "String"
-  value       = try(aws_security_group.codebuild_runner[0].id, null)
+  value       = aws_security_group.codebuild_runner.id
 
   tags = { Name = "${var.project_name}-codebuild-runner-sg-id" }
 }
 
-# ── Stage 6-B 입력값 ──────────────────────────────────────
-# 변수 선언은 variables.tf 에 중앙화한다.
-# - codebuild_runner_enabled
-# - github_repo_url
-# - github_connection_arn
+# ── 입력값 ────────────────────────────────────────────────
+# 변수 선언은 variables.tf 에 중앙화하며, 둘 다 **기본값이 있어 -var 가 불필요**하다.
+# - github_repo_url        저장소 HTTPS URL
+# - github_connection_arn  CodeConnections 연결 ARN (시크릿 아님)
 #
-# ⚠ Stage 6-B 수동 작업 (Terraform 밖):
-#   1) CodeConnections 연결 생성·승인
-#   2) codebuild_runner_enabled=true + github_repo_url/github_connection_arn 입력
-#   3) 레포 Variables: CODEBUILD_RUNNER / AWS_DEPLOY_ROLE_ARN / DEPLOY_ENABLED=true
-#   (Stage 6-A에서는 기본 false라 이 입력들이 필요 없다. 웹훅은 Terraform이 생성한다.)
+# ⚠ Terraform 밖 선행 작업 (1회):
+#   1) CodeConnections 연결 생성 후 **GitHub App 승인** — PAT 금지
+#      (PAT 는 AWS→GitHub 방향에 장기 자격증명을 만들어 "키 없음" 원칙이 실제로 후퇴한다)
+#   2) 레포 Variables: CODEBUILD_RUNNER / AWS_DEPLOY_ROLE_ARN / DEPLOY_ENABLED=true
+#   웹훅은 Terraform 이 생성한다(WORKFLOW_JOB_QUEUED 필터).
+#
+# ⚠ 연결 승인 직후 apply 하면 `OAuthProviderException` 이 날 수 있다 —
+#   IAM 문제가 아니라 연결 상태가 AVAILABLE 로 전파되기까지의 지연이다(#21).
+#   1~2분 후 재시도하면 실패 지점부터 이어서 생성된다.
 
 output "codebuild_runner_project_name" {
   description = "워크플로 runs-on 에 사용할 CodeBuild 프로젝트 이름"
-  value       = try(aws_codebuild_project.gha_runner[0].name, null)
+  value       = aws_codebuild_project.gha_runner.name
 }
 
 output "codebuild_runner_sg_id" {
   description = "러너 SG (04-eks 가 SSM 으로 읽어 클러스터 SG 인바운드에 사용)"
-  value       = try(aws_security_group.codebuild_runner[0].id, null)
+  value       = aws_security_group.codebuild_runner.id
 }
