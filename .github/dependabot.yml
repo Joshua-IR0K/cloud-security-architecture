@@ -1,38 +1,30 @@
 # ============================================================
-# .github/dependabot.yml — 의존성 자동 업데이트 (공급망 보안)
+# .github/dependabot.yml
 # ============================================================
-#
-# Terraform 레포에서 Dependabot이 하는 일:
-#   1. GitHub Actions 버전 추적 (actions/checkout 등이
-#      구버전·취약 버전이 되면 업데이트 PR 자동 생성)
-#   2. Terraform Provider 버전 추적 (aws provider 등)
-#
-# 업데이트 PR도 우리 CI(plan + checkov)를 통과해야 머지
-# → 의존성 업데이트조차 검증 게이트를 거치는 구조
+# "고정하되 갱신을 자동화한다" — 재현성과 패치 반영의 표준 균형.
+#   Action  = 커밋 SHA 핀  → github-actions ecosystem 이 갱신 PR
+#   base    = digest 핀    → docker ecosystem 이 갱신 PR   ★ G8
+# 핀만 하고 방치하면 보안 패치를 받지 못한다.
+# PR 로 오므로 검토 없이 반영되지 않는다 — 공급망 통제를 유지하면서 최신성을 확보.
 # ============================================================
 
 version: 2
 updates:
-  # GitHub Actions 의존성 (워크플로우의 uses: 액션들)
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
-    labels:
-      - "dependencies"
-      - "github-actions"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+    labels: ["dependencies", "supply-chain"]
 
-  # Terraform Provider 의존성 (스택별)
-  - package-ecosystem: "terraform"
-    directories:
-      - "/00-bootstrap"
-      - "/01-network"
-      - "/02-security"
-      - "/03-workload"
-      - "/04-eks"
-      - "/05-k8s"
+  # ★ G8 — base image digest 핀의 짝
+  - package-ecosystem: "docker"
+    directory: "/images/s5-good"
     schedule:
       interval: "weekly"
-    labels:
-      - "dependencies"
-      - "terraform"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(image)"
+    labels: ["dependencies", "supply-chain", "base-image"]
