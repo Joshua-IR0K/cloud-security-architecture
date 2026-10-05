@@ -259,7 +259,7 @@ jobs:
           waited=0
           while true; do
             reason=$(aws inspector2 list-coverage \
-              --filter-criteria "{\"ecrImageTags\":[],\"resourceType\":[{\"comparison\":\"EQUALS\",\"value\":\"AWS_ECR_CONTAINER_IMAGE\"}],\"ecrRepositoryName\":[{\"comparison\":\"EQUALS\",\"value\":\"${REPO_NAME}\"}]}" \
+              --filter-criteria "{\"resourceType\":[{\"comparison\":\"EQUALS\",\"value\":\"AWS_ECR_CONTAINER_IMAGE\"}],\"ecrRepositoryName\":[{\"comparison\":\"EQUALS\",\"value\":\"${REPO_NAME}\"}]}" \
               --query "coveredResources[?contains(resourceId, '${DIGEST#sha256:}')].scanStatus.reason | [0]" \
               --output text)
             echo "  scan status: ${reason} (${waited}s)"
