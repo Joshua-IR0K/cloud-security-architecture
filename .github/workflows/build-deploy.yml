@@ -154,7 +154,7 @@ jobs:
       #   결과가 안 보이는" 상태가 된다. SBOM 은 아래에서 digest 기준 별도 생성.
       - name: Build image
         if: steps.exists.outputs.found == 'false'
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: images/s5-${{ steps.tag.outputs.variant }}
           platforms: linux/amd64
