@@ -8,7 +8,7 @@
 #   build  : GitHub 호스티드 — 인터넷만 있으면 됨(ECR·GitHub)
 #   deploy : CodeBuild(VPC) — EKS 엔드포인트가 관리자 IP /32 로 제한돼 있어
 #            GitHub 러너로는 도달 불가. 러너 IP 대역을 allowlist 에 추가하는 대신
-#            컴퓨트를 VPC 안으로 옮긴다(D33).
+#            컴퓨트를 VPC 안으로 옮긴다(D41).
 #
 # 소유권 (D42 Delegated Field Ownership):
 #   Terraform → Deployment 의 구조·보안(replica·probe·볼륨·SA·securityContext)
@@ -22,8 +22,8 @@
 #   SHA 는 내용에 고정되므로 이 공격에 면역이다.
 #   → S5 의 ECR IMMUTABLE, S7 의 digest 서명과 같은 원리(이름이 아니라 내용으로 식별).
 #   ⚠ 핀만 하고 방치하면 오래된 액션을 쓰게 된다 → .github/dependabot.yml 로 자동 추적.
-#   Stage 6에서 실제 검증한 액션 SHA를 유지하고, Stage 7 신규 cosign-installer도
-#   40자리 SHA로 고정했다. Dependabot으로 업데이트 후보만 추적하고 자동 반영하지 않는다.
+#   ★ 아래 action은 2026-08-30 기준 검증된 release commit SHA로 고정했다.
+#     Dependabot의 github-actions 업데이트 PR로 새 SHA를 추적하고 사람이 검토 후 반영한다.
 #
 # 사전 준비 (레포 Variables):
 #   AWS_BUILD_ROLE_ARN   00-bootstrap output: github_actions_build_role_arn
@@ -66,7 +66,6 @@ jobs:
     outputs:
       image_tag: ${{ steps.tag.outputs.value }}
       image_uri: ${{ steps.digest.outputs.uri }}
-      image_digest_uri: ${{ steps.digest.outputs.digest_uri }}
       digest: ${{ steps.digest.outputs.value }}
 
     steps:
@@ -175,11 +174,11 @@ jobs:
       #
       # ⚠ trivy-action 은 2026.3 태그 오염 사건의 당사자다(버전 태그 76개가
       #   악성 커밋으로 force-push 됨). 태그가 아니라 커밋 SHA 로 핀한다.
-      #   ★ 배포 전 실제 릴리스 커밋 SHA 로 교체:
-      #     git ls-remote https://github.com/aquasecurity/trivy-action refs/tags/*
+      #   현재 workflow는 검증된 release commit SHA 로 이미 고정돼 있으며,
+      #   Dependabot PR을 통해 새 release SHA를 추적한다.
       - name: Trivy vulnerability gate
         if: steps.exists.outputs.found == 'false'
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # v0.35.0
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # 0.35.0
         with:
           image-ref: ${{ steps.repo.outputs.url }}:${{ steps.tag.outputs.value }}
           format: table
@@ -188,8 +187,9 @@ jobs:
           scanners: vuln
           exit-code: "1"
 
-      - name: Login to ECR
-        if: steps.exists.outputs.found == 'false'
+      # push뿐 아니라 rerun 시 Syft가 private ECR의 기존 digest를 다시 읽어
+      # SBOM을 재생성할 때도 registry credential이 필요하다. 따라서 항상 로그인한다.
+      - name: Login to ECR (push / SBOM read)
         run: aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${{ steps.repo.outputs.registry }}"
 
       - name: Push image
@@ -207,7 +207,6 @@ jobs:
           {
             echo "value=${DIGEST}"
             echo "uri=${{ steps.repo.outputs.url }}:${{ steps.tag.outputs.value }}"
-            echo "digest_uri=${{ steps.repo.outputs.url }}@${DIGEST}"
           } >> "$GITHUB_OUTPUT"
 
       # SBOM 은 "레지스트리에 실제로 올라간 것"을 대상으로 생성한다.
@@ -217,211 +216,6 @@ jobs:
       #   보존 기간(90일) 만료나 실수로 유실될 수 있다. digest 는 조회 가능하므로
       #   같은 digest 기준으로 언제든 재생성할 수 있어야 한다.
       #   → 이 스텝에는 exists 조건을 걸지 않는다.
-      # ══ Stage 7: cosign KMS 서명 ══════════════════════════
-      # 서명 대상은 태그가 아니라 digest 다. 태그는 이름이고 digest 가 신원이며,
-      # Kyverno 가 검증하는 것도, 파드가 실행하는 것도 같은 digest 여야 한다.
-      #   D = sha256:...  → sign(D) = deploy(D) = verify(D) = run(D)
-
-      # ── ① 빌드 역할의 레지스트리 자격증명 폐기 (P0) ──────
-      # ⚠ AWS 자격증명을 sign 역할로 바꿔도 ~/.docker/config.json 의 ECR 토큰은
-      #   **그대로 남는다.** 그 상태로 서명하면
-      #     IAM 신원 = gha-sign / 실제 registry write = gha-build 토큰
-      #   이 되어, 역할은 분리했는데 **레지스트리 쓰기 경계가 흐려진다.**
-      #   S7 의 "서명 권한 분리" 논지가 반쪽이 되므로 명시적으로 로그아웃한다.
-      # ══ ⑥ Amazon Inspector 배포 게이트 (G7) ══════════════════
-      # ★ exists 조건을 걸지 않는다 — 재사용 경로에서도 반드시 실행한다.
-      #   재사용 시 ②Build·③Trivy·④Push 가 모두 생략되므로, 이 게이트가 없으면
-      #   빌드 이후 새로 발견된 CVE 가 있는 이미지를 그대로 재배포하게 된다.
-      #
-      # 역할 분담:
-      #   Trivy     빌드타임, 신규 이미지만     — 푸시 전 차단
-      #   Inspector 레지스트리 지속 재평가     — 재배포 포함 ★
-      #
-      # 서명과의 관계:
-      #   서명은 "서명 당시 신뢰했다"는 시점 증명이고,
-      #   Inspector 는 "지금도 안전한가"를 지속 평가한다.
-      #   이미 서명된 baseline 도 나중에 CVE 가 나올 수 있다.
-      #   → 이 게이트는 ⑦ 서명보다 앞에 둔다. 신뢰할 수 없는 것에 서명하지 않는다.
-      #
-      # ⚠ Inspector 는 비동기다(S5 에서 PENDING_INITIAL_SCAN 관측).
-      #   스캔 완료까지 polling 하고, timeout 이면 **fail-closed** —
-      #   결과를 모르는 이미지를 통과시키지 않는다.
-      - name: Inspector gate (scan completion + findings)
-        env:
-          REPO_NAME: ${{ steps.repo.outputs.name }}
-          DIGEST: ${{ steps.digest.outputs.value }}
-          MAX_WAIT: "600"   # 10분
-        run: |
-          set -euo pipefail
-          echo "== ⑥ Inspector gate: ${REPO_NAME}@${DIGEST}"
-
-          # (a) 스캔 완료 대기
-          waited=0
-          while true; do
-            reason=$(aws inspector2 list-coverage \
-              --filter-criteria "{\"resourceType\":[{\"comparison\":\"EQUALS\",\"value\":\"AWS_ECR_CONTAINER_IMAGE\"}],\"ecrRepositoryName\":[{\"comparison\":\"EQUALS\",\"value\":\"${REPO_NAME}\"}]}" \
-              --query "coveredResources[?contains(resourceId, '${DIGEST#sha256:}')].scanStatus.reason | [0]" \
-              --output text)
-            echo "  scan status: ${reason} (${waited}s)"
-            if [ "$reason" = "SUCCESSFUL" ]; then break; fi
-            if [ "$waited" -ge "$MAX_WAIT" ]; then
-              echo "::error::Inspector 스캔이 ${MAX_WAIT}s 내에 완료되지 않음 — fail-closed"
-              exit 1
-            fi
-            sleep 20; waited=$((waited+20))
-          done
-
-          # (b) 차단 기준 평가
-          #   CRITICAL / HIGH 중 수정 버전이 있는 것 (Trivy 기준과 정합)
-          #   + Platform EOL(IN-DISCONTINUED-*) — 패치 자체가 없으므로 무조건 차단
-          findings=$(aws inspector2 list-findings \
-            --filter-criteria "{\"ecrImageHash\":[{\"comparison\":\"EQUALS\",\"value\":\"${DIGEST}\"}],\"findingStatus\":[{\"comparison\":\"EQUALS\",\"value\":\"ACTIVE\"}],\"severity\":[{\"comparison\":\"EQUALS\",\"value\":\"CRITICAL\"},{\"comparison\":\"EQUALS\",\"value\":\"HIGH\"}]}" \
-            --query "findings[?fixAvailable=='YES' || starts_with(packageVulnerabilityDetails.vulnerabilityId, 'IN-DISCONTINUED')].{id:packageVulnerabilityDetails.vulnerabilityId,sev:severity,fix:fixAvailable}" \
-            --output json)
-          count=$(echo "$findings" | jq 'length')
-          echo "  blocking findings: ${count}"
-          if [ "$count" -gt 0 ]; then
-            echo "$findings" | jq -r '.[] | "  \(.sev)\t\(.id)\tfix=\(.fix)"'
-            echo "::error::Inspector 차단 기준 해당 finding ${count}건 — 배포 중단"
-            exit 1
-          fi
-          echo "  ✅ Inspector gate PASS"
-
-      - name: Logout build registry credentials
-        run: docker logout "${{ steps.repo.outputs.registry }}"
-
-      # ── ② 서명 전용 역할로 전환 ──────────────────────────
-      # 빌드 역할에 kms:Sign 을 얹지 않는 이유: 빌드 경로 침해가 곧 임의 서명이
-      # 되면 admission 통제 전체가 무력화된다. 서명 권한 분리가 S7 의 하중을 진다.
-      - name: Configure AWS Credentials (sign role)
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a  # v4.3.1
-        with:
-          role-to-assume: ${{ vars.AWS_SIGN_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-          role-session-name: gha-sign-${{ github.run_id }}
-
-      # ── ③ sign 역할 기준으로 ECR 재로그인 ────────────────
-      # cosign 은 서명값 생성(KMS)에 더해 **아티팩트를 ECR 에 push** 한다.
-      # 이 토큰이 sign 역할에서 발급돼야 IAM 경계와 레지스트리 경계가 일치한다.
-      - name: Login to ECR (sign role)
-        run: aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${{ steps.repo.outputs.registry }}"
-
-      - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
-        with:
-          cosign-release: 'v3.1.3'
-          # ⚠ 버전을 명시적으로 고정한다. cosign 의 서명 저장 방식(레거시 태그 vs
-          #   OCI 1.1 referrers)은 버전·레지스트리 지원 여부·플래그에 따라 달라지므로
-          #   "vN 은 X 방식"으로 단정하지 않는다.
-          #   → 대신 아래 "Prove signature storage" 에서 **실제 저장 결과를 관측**해
-          #     기록하고, 그 관측값을 기준으로 Kyverno 검증 호환성을 판단한다.
-
-      - name: Resolve signing material
-        id: signkey
-        run: |
-          KEY_ARN=$(aws ssm get-parameter \
-            --name "/devsecops-project/security/signing_key_arn" \
-            --query "Parameter.Value" --output text)
-          echo "uri=awskms:///${KEY_ARN}" >> "$GITHUB_OUTPUT"
-          # ★ 공개키 PEM — Kyverno 가 쓸 것과 **동일한** 검증 material
-          aws ssm get-parameter \
-            --name "/devsecops-project/security/signing_public_key_pem" \
-            --query "Parameter.Value" --output text > cosign.pub
-          echo "--- verification material (public) ---"; cat cosign.pub
-
-      # ── 서명 멱등성: "verify 실패 = unsigned" 로 단정하지 않는다 ──────
-      # registry/network/PEM 오류까지 unsigned 로 오판해 재서명하면 failure mode를 숨긴다.
-      # 먼저 ECR의 subject→referrer 관계를 직접 조회한다.
-      - name: Inspect existing Sigstore referrers
-        id: sigref
-        env:
-          REPO_NAME: ${{ steps.repo.outputs.name }}
-          DIGEST: ${{ steps.digest.outputs.value }}
-        run: |
-          set -euo pipefail
-          aws ecr list-image-referrers \
-            --repository-name "$REPO_NAME" \
-            --subject-id imageDigest="$DIGEST" \
-            --output json > ecr-referrers-before.json
-
-          COUNT=$(jq '[.referrers[]? | select(.artifactStatus == "ACTIVE" and ((.artifactType // "") | contains("sigstore")))] | length' ecr-referrers-before.json)
-          echo "count=${COUNT}" >> "$GITHUB_OUTPUT"
-          if [ "$COUNT" -gt 0 ]; then
-            echo "found=true" >> "$GITHUB_OUTPUT"
-            echo "ACTIVE Sigstore referrer 존재 — 재서명하지 않고 기존 서명을 검증한다"
-          else
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            echo "Sigstore referrer 없음 — 최초 서명을 수행한다"
-          fi
-
-      # 기존 referrer가 있다면 검증 실패를 재서명으로 덮지 않는다.
-      - name: Verify existing signature (fail closed)
-        if: steps.sigref.outputs.found == 'true'
-        run: |
-          cosign verify --key cosign.pub --insecure-ignore-tlog=true \
-            "${{ steps.repo.outputs.url }}@${{ steps.digest.outputs.value }}"
-
-      - name: Sign image digest
-        if: steps.sigref.outputs.found == 'false'
-        run: |
-          # ⚠ D44: 투명성 로그(Rekor) 미사용 — 로컬 baseline 서명과 같은 계약.
-          #   KMS 장기 키 + 정적 PEM 검증이므로 Rekor 가 증명하는
-          #   "서명 당시 인증서 유효성"이 필요 없고, 프라이빗 아티팩트의
-          #   digest 를 공개 로그에 영구 게시하지 않는다.
-          #   cosign v3.1 은 --tlog-upload 를 deprecated → signing-config 방식.
-          # ⚠ 반드시 아래 verify 의 --insecure-ignore-tlog 와 **함께** 바꾼다(#23).
-          #   서명만 바꾸면 검증이 "0 < 1" 로 실패한다.
-          cosign sign --yes \
-            --signing-config .github/cosign/signing-config.json \
-            --key "${{ steps.signkey.outputs.uri }}" \
-            "${{ steps.repo.outputs.url }}@${{ steps.digest.outputs.value }}"
-
-      # ── ④ 검증은 정적 PEM 으로 (KMS URI 아님) ────────────
-      # CI와 Kyverno가 동일한 trust material을 사용해야 Sign(D)=Verify(D)의
-      # failure domain을 분리할 수 있다.
-      - name: Verify signature with static public key (pre-admission)
-        run: |
-          cosign verify --key cosign.pub --insecure-ignore-tlog=true \
-            "${{ steps.repo.outputs.url }}@${{ steps.digest.outputs.value }}"
-
-      # ── ⑤ ECR API로 OCI 1.1 referrer를 직접 증명 ───────────
-      # .sig tag의 부재나 cosign 해석 결과만으로 추론하지 않는다.
-      - name: Prove signature attachment with ECR referrer API
-        env:
-          REPO_NAME: ${{ steps.repo.outputs.name }}
-          DIGEST: ${{ steps.digest.outputs.value }}
-        run: |
-          set -euo pipefail
-          aws ecr list-image-referrers \
-            --repository-name "$REPO_NAME" \
-            --subject-id imageDigest="$DIGEST" \
-            --output json > ecr-referrers.json
-          cat ecr-referrers.json
-
-          COUNT=$(jq '[.referrers[]? | select(.artifactStatus == "ACTIVE" and ((.artifactType // "") | contains("sigstore")))] | length' ecr-referrers.json)
-          if [ "$COUNT" -lt 1 ]; then
-            echo "::error::ACTIVE Sigstore referrer가 확인되지 않음"
-            exit 1
-          fi
-          echo "ACTIVE Sigstore referrer count=${COUNT}"
-
-          # 사람이 보기 좋은 보조 evidence. 판정의 기준은 위 AWS API 결과다.
-          cosign tree "${{ steps.repo.outputs.url }}@${{ steps.digest.outputs.value }}" || true
-
-      # ── ⑥ 빌드 역할 복귀 (SBOM 은 ECR 읽기 필요) ─────────
-      - name: Logout sign registry credentials
-        run: docker logout "${{ steps.repo.outputs.registry }}"
-
-      - name: Configure AWS Credentials (build role, restore)
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a  # v4.3.1
-        with:
-          role-to-assume: ${{ vars.AWS_BUILD_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-          role-session-name: gha-build-restore-${{ github.run_id }}
-
-      - name: Login to ECR (build role, restore)
-        run: aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${{ steps.repo.outputs.registry }}"
-
       - name: Generate SBOM (Syft, CycloneDX)
         uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26  # v0.24.2
         with:
@@ -460,7 +254,7 @@ jobs:
 
     steps:
       # ★ 러너가 CodeBuild 컴퓨트여도 AWS 접근은 GitHub OIDC 를 쓴다.
-      #   CodeBuild 서비스 역할은 러너 배관(ENI/로그)만 담당 —
+      #   CodeBuild 서비스 역할은 러너 배관(ENI/로그/CodeConnection)만 담당 —
       #   컴퓨트 신원과 배포 신원의 분리가 이 설계의 핵심.
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a  # v4.3.1
@@ -479,27 +273,21 @@ jobs:
       # 여기서는 **실제로 수임된 신원**(GitHub OIDC → gha-deploy-role →
       # EKS access entry → ci-deployer 그룹 → RoleBinding)으로 검사하므로
       # 전 경로가 한 번에 검증된다.
-      # 실패해도 배포를 막지 않는다(증거 수집이 목적) — continue-on-error.
-      # ── ⑤ SCOPE: 실제 CI 신원의 권한 경계 ────────────────
-      # impersonation 이 아니라 **러너에서 실제 신원으로** 실행한다 —
-      # OIDC → deploy 역할 → access entry → 그룹 → RoleBinding → RBAC 전 경로 검증.
+      # 모든 결과를 수집한 뒤 하나라도 기대와 다르면 마지막에 실패(fail-final)한다.
       - name: Verify least privilege (positive / negative)
         run: |
-          # ⚠ kubectl auth can-i 는 "no" 일 때 exit 1 을 반환한다.
-          #   그대로 나열하면 첫 negative 에서 스텝이 끊겨 뒤쪽 증거가 수집되지 않는다.
-          #   → 결과를 캡처해 **끝까지 수행**하되, 불일치가 하나라도 있으면
-          #     마지막에 exit 1 한다(fail-final).
-          #   ★ 이전 방식은 exit code 를 완전히 삼켜서, 과도한 권한이 생겨도
-          #     파이프라인이 초록불로 끝났다 — 검증이 아니라 관측에 그쳤다.
-          FAILED=0
-          check() {  # $1=기대(yes|no)  $2..=kubectl 인자
+          # fail-fast는 피하되 fail-final로 동작한다.
+          # 모든 positive/negative 결과를 끝까지 수집한 뒤 하나라도 예상과 다르면 실패.
+          failures=0
+          check() {  # $1=expected(yes|no), $2..=kubectl auth can-i args
             local want="$1"; shift
-            local got; got=$(kubectl auth can-i "$@" 2>/dev/null || true)
+            local got
+            got=$(kubectl auth can-i "$@" 2>/dev/null || true)
             if [ "$got" = "$want" ]; then
               printf 'OK  expect=%-3s got=%-3s : %s\n' "$want" "$got" "$*"
             else
               printf '!!  expect=%-3s got=%-3s : %s\n' "$want" "$got" "$*"
-              FAILED=1
+              failures=$((failures + 1))
             fi
           }
 
@@ -513,11 +301,12 @@ jobs:
           check no  create pods/exec -n default
           check no  patch deployment/netpol-client -n default
 
-          if [ "$FAILED" -ne 0 ]; then
-            echo "::error::RBAC 경계가 기대와 다르다 — 과도한 권한 또는 누락"
+          if [ "$failures" -ne 0 ]; then
+            echo "::error::RBAC acceptance mismatch: ${failures} check(s)"
             exit 1
           fi
 
+      # 현재 이미지 기록 — 롤백 지점이자 변경 증거
       - name: Capture current image
         id: before
         run: |
@@ -532,11 +321,8 @@ jobs:
       # RBAC 상 이 Deployment 의 patch 만 가능 — 다른 객체는 손댈 수 없다.
       - name: Roll out image
         run: |
-          # ★ S7: 태그가 아니라 digest 로 배포한다.
-          #   정책의 verifyDigest=true 가 태그 참조를 거부하므로 필수이며,
-          #   서명 대상과 배포 대상이 같은 digest 임을 보장한다.
           kubectl set image deployment/nginx \
-            nginx="${{ needs.build.outputs.image_digest_uri }}" -n default
+            nginx="${{ needs.build.outputs.image_uri }}" -n default
 
       - name: Wait for rollout
         run: kubectl rollout status deployment/nginx -n default --timeout=180s
@@ -547,7 +333,7 @@ jobs:
           DEPLOYED=$(kubectl get deployment nginx -n default \
             -o jsonpath='{.spec.template.spec.containers[0].image}')
           echo "배포 후: ${DEPLOYED}"
-          [ "${DEPLOYED}" = "${{ needs.build.outputs.image_digest_uri }}" ] || {
+          [ "${DEPLOYED}" = "${{ needs.build.outputs.image_uri }}" ] || {
             echo "::error::배포된 이미지가 빌드 산출물과 다름"; exit 1; }
 
       - name: Summary
@@ -558,7 +344,7 @@ jobs:
             echo "| 항목 | 값 |"
             echo "|---|---|"
             echo "| 이전 | \`${{ steps.before.outputs.image }}\` |"
-            echo "| 현재 | \`${{ needs.build.outputs.image_digest_uri }}\` |"
+            echo "| 현재 | \`${{ needs.build.outputs.image_uri }}\` |"
             echo "| digest | \`${{ needs.build.outputs.digest }}\` |"
             echo ""
             echo "페이지의 Build 값이 위 커밋과 일치하면"

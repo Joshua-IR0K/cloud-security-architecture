@@ -63,10 +63,7 @@ resource "kubernetes_deployment_v1" "nginx" {
           #   추가 IAM 작업 없이 pull 가능 (S2 detach 때 보존된 권한).
           #   ⚠ 리포지토리가 IMMUTABLE — 재빌드 시 새 태그 + var 갱신 필요.
           #   S7 에서 digest 핀 + cosign 서명 검증으로 대체.
-          # ★ S7: 태그가 아니라 digest 참조 (D43 갱신)
-          #   정책의 verifyDigest=true 가 태그 참조를 거부하므로 baseline 도 digest 여야 한다.
-          #   "태그는 이름, digest 가 신원" — S5 IMMUTABLE 실증의 연장.
-          image = "${local.ecr_repository_url}@${var.app_image_digest}"
+          image = "${local.ecr_repository_url}:${var.app_image_tag}"
 
           port {
             container_port = 80
@@ -98,16 +95,6 @@ resource "kubernetes_deployment_v1" "nginx" {
     }
   }
 
-  # ── ★ P0: 정책이 먼저 존재해야 한다 (S7) ─────────────────
-  # fresh apply 에서 Deployment 가 정책보다 먼저 생성되면 baseline 파드가
-  # **검증 없이 admission 을 통과**한다. background 평가를 껐으므로
-  # 사후 재검증도 되지 않아, 검증된 적 없는 이미지가 조용히 도는 상태가 된다.
-  # → 실패보다 나쁘다(잘못된 안전감). 명시적 순서로 막는다.
-  depends_on = [
-    kubectl_manifest.nginx_image_source_guard,
-    kubectl_manifest.image_verification,
-  ]
-
   # ── Delegated Field Ownership (D42) ───────────────────────
   # 컨테이너 이미지 필드의 소유권을 CI 에 명시적으로 위임한다.
   #
@@ -132,7 +119,7 @@ resource "kubernetes_deployment_v1" "nginx" {
   #   refresh 가 실제 값(CI 가 설정한 이미지)을 state 로 읽고,
   #   plan 은 ignore 대상에 config 대신 prior state 를 쓴다
   #   → Terraform 이 다른 필드를 고쳐도 CI 의 이미지는 유지된다.
-  #   ⚠ 단 "생성" 시점에는 config 가 적용된다 → var.app_image_digest 의 baseline 의미(D43)
+  #   ⚠ 단 "생성" 시점에는 config 가 적용된다 → var.app_image_tag 의 baseline 의미(D43)
   lifecycle {
     ignore_changes = [
       spec[0].template[0].spec[0].container[0].image

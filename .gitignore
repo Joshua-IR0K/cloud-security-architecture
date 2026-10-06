@@ -18,3 +18,10 @@ crash.*.log
 # OS
 .DS_Store
 Thumbs.db
+
+
+# Stage 7 로컬 작업 파일 (stage7-wip 브랜치에서 사용)
+cosign.pub
+pk.b64
+sc-full.json
+signing-config*.json

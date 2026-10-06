@@ -4,7 +4,7 @@
 # ★ 게이트 분리(스택 분리의 부수 효과):
 #   cni_node_role_policy_attached → 04-eks (AWS 평면 = IAM)
 #   network_policy_enforcement    → 05-k8s (K8s 평면 = 정책 리소스)
-#   프로파일도 각 스택의 tfvars/ 에 따로 존재한다.
+#   현재 final bundle은 실제 적용값을 terraform.tfvars 또는 명시적 -var 로 전달한다.
 # ============================================================
 
 variable "region" {
@@ -71,70 +71,35 @@ variable "secrets_store_driver_version" {
   default     = "1.5.4"
 }
 
-variable "app_image_digest" {
+variable "app_image_tag" {
   description = <<-EOT
-    ★ D43 갱신 (S7): baseline 을 **digest** 로 참조한다.
-      형식: sha256:abc123...  (repo@ 뒤에 붙는 부분)
+    ★ 의미 재정의 (D43): 이 값은 "현재 실행 중인 이미지"가 아니라
+      **bootstrap / creation-time baseline** 이다.
 
-    왜 태그가 아닌가:
-      Kyverno 정책의 verifyDigest=true 가 태그 참조를 거부한다.
-      태그 기반 baseline 을 그대로 두면 **재구축 시 05 apply 가 admission 에서
-      차단**되어 사이클 자체가 깨진다(체크리스트 #7 ↔ D43 충돌 해소).
+    Deployment 의 image 필드는 lifecycle.ignore_changes 로 CI 에 위임돼 있다(D42).
+    따라서 이 변수는 **Deployment 가 처음 생성될 때만** 반영되고,
+    그 이후 변경(-var / tfvars)은 plan 에 나타나지 않는다.
+      → EKS 모듈의 desired_size 와 동일한 "생성 시점 전용" 의미론(D6).
 
-    ⚠ 이 digest 의 이미지는 **반드시 서명돼 있어야 한다**(체크리스트 #1).
-      미서명 baseline 은 fail-closed 정책에 걸려 Deployment 생성이 거부된다.
-      baseline 승격 절차는 STAGE7_RUNBOOK.md 참고.
+    사이클 동작 (destroy/apply 반복 환경에서 중요):
+      apply        → 이 baseline 이미지로 기동
+      CI 배포      → s6-<sha> 로 롤포워드 (Terraform 은 이를 되돌리지 않음)
+      destroy/apply → 다시 baseline 으로 시작
+      = 재구축은 "알려진 기준선"에서 출발하고 CI 가 앞으로 굴린다 (채택 원칙 가)
+      = 최신 이미지를 재구축 직후 원하면 CI 를 재실행한다 (검증 세션 한정 절차 나)
 
-    조회:
-      aws ecr describe-images --repository-name devsecops-project/app \
-        --image-ids imageTag=<태그> --query "imageDetails[0].imageDigest" --output text
+    baseline 갱신 시점: 검증된 이미지를 새 기준선으로 승격할 때만 이 값을 올린다.
+    ⚠ 리포지토리가 IMMUTABLE 이라 같은 태그 재푸시는 불가 — 새 태그를 쓴다.
+    S7 에서는 태그 대신 digest(repo@sha256:...) 로 발전시킨다.
 
-    의미론은 그대로: 생성 시점에만 반영되고(ignore_changes, D42),
-    이후는 CI 가 digest 로 롤포워드한다.
+    ⚠ 현재 ECR lifecycle 은 **untagged image만 1일 후 자동 정리**한다.
+      s5-*/s6-*/baseline-* 등 tagged artifact는 자동 만료하지 않는다.
+      개인 포트폴리오 규모에서는 복잡한 tagged retention보다 재현성·증거 보존을
+      우선하고, 필요 시 스테이지 종료 후 수동 정리한다.
+      검증된 이미지를 기준선으로 승격할 때는 재빌드하지 않고 동일 digest에
+      새 versioned tag(`baseline-vN`)를 부여한다. IMMUTABLE이므로 기존 baseline
+      tag를 다른 digest로 덮어쓰지 않는다.
   EOT
   type        = string
-
-  validation {
-    condition     = can(regex("^sha256:[0-9a-f]{64}$", var.app_image_digest))
-    error_message = "app_image_digest must be a valid sha256:<64 lowercase hex> digest."
-  }
-}
-
-# ── Stage 7 ────────────────────────────────────────────────
-variable "kyverno_chart_version" {
-  description = <<-EOT
-    Kyverno Helm 차트 버전.
-
-    ★ 차트 버전 ≠ 앱 버전이다 (공식 릴리스 절차 기준):
-        chart 3.9.0  ↔  app v1.19.0
-      ImageValidatingPolicy(policies.kyverno.io/v1)는 **앱 1.19+** 요건이므로
-      차트는 **3.9.x** 여야 한다. 3.6.x 는 1.16 계열이라 해당 CRD 가 없어
-      정책 apply 가 실패한다.
-
-    ⚠ ClusterPolicy 는 v1.20(2026-10)에서 제거된다 — 신규 구현은 1.19+ 필수.
-    확인: helm search repo kyverno/kyverno --versions | Select-Object -First 5
-      (APP VERSION 열이 v1.19.x 인지 함께 볼 것)
-  EOT
-  type        = string
-  default     = "3.9.0"
-}
-
-variable "image_verification_action" {
-  description = <<-EOT
-    Stage 7 source-guard + signature 정책의 동작. **Audit → Deny 순서를 반드시 지킨다.**
-
-    Audit : 위반을 PolicyReport 에 기록하되 배포는 허용.
-            이 단계에서 확인 — registry source boundary / 이미지 참조 매칭 / 검증 material /
-            Kyverno 의 ECR 접근 / 네임스페이스 스코프 / Pod·Deployment 매칭
-    Deny  : 미서명 아티팩트 admission 거부 (S7 머니샷)
-
-    처음부터 Deny 로 시작하면 설정 오류와 정책 동작을 구분할 수 없다.
-  EOT
-  type        = string
-  default     = "Audit"
-
-  validation {
-    condition     = contains(["Audit", "Deny"], var.image_verification_action)
-    error_message = "Audit 또는 Deny 여야 합니다."
-  }
+  default     = "baseline-v1"
 }
