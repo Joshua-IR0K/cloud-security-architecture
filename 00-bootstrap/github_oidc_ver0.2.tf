@@ -1,5 +1,5 @@
 # ============================================================
-# 00-bootstrap/github_oidc.tf — GitHub Actions OIDC (장기 키 제거)
+# 00-bootstrap/github_oidc_ver0.2.tf — GitHub Actions OIDC, plan 역할 (장기 키 제거)
 # ============================================================
 #
 # 목적: GitHub Actions가 AWS에 접근할 때 장기 Access Key 없이
@@ -19,6 +19,13 @@
 #   - prevent_destroy 추가 (영속 리소스 보호)
 #   - plan에 실제 필요한 권한 보강 (events, inspector2, sts, s3 read 등)
 #   - thumbprint: 단일 유지 (AWS가 GitHub thumbprint 무시 → 추가 불필요)
+#   - [A-1, 2026-10] plan 역할 최소권한 재설계 — 멘토 피드백 ②
+#       · 신뢰: pull_request 만 (main 제거 — 미사용 + 측면 이동 경로)
+#       · state: 01·02 두 파일만 읽기 / 목록은 env:/ 접두어만 / 잠금 테이블은 다이제스트 읽기만
+#       · 시크릿 경로 제거: Okta GetSecretValue · KMS Decrypt
+#         + 같은 값을 '설정 조회'로 돌려주는 서비스 제거: CloudFront · ELB · WAF
+#       · 01·02 가 쓰지 않는 서비스 제거: logs / 설정 이력(config:Get*)
+#       · 추가: kms:GetPublicKey — 02 의 aws_kms_public_key 데이터 소스용 (공개키, 비민감)
 #
 # ============================================================
 
@@ -66,24 +73,27 @@ data "aws_iam_policy_document" "github_assume" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # ★ 레포 + 이벤트 정확 일치 (StringEquals — 와일드카드 없음)
-    #   - PR 이벤트: plan-on-PR 동작에 필요
-    #   - main ref: merge 후 동작에 필요
+    # ★ pull_request 만 신뢰한다 (StringEquals — 와일드카드 없음)
     #
-    # [Fork PR 보안 메모]
-    #   pull_request 이벤트는 이론상 fork에서도 발생 가능하나:
-    #   1) 이 레포는 Private → 외부인이 fork 불가
-    #   2) fork PR은 기본적으로 id-token:write 권한이 없어 OIDC 토큰 발급 불가
-    #   → 현재 환경에서 fork PR 공격 벡터는 실질적으로 차단됨
-    #   ⚠ 향후 Public 전환 시: GitHub Environment(보호 규칙)로 sub를
-    #      "repo:OWNER/REPO:environment:plan"으로 핀하는 강화 권장
+    # [A-1] main ref 를 지운 이유 — 쓰이지 않는데 위험한 경로였다
+    #   이 역할을 쓰는 워크플로는 terraform-plan.yml 하나이고 pull_request 에서만 돈다.
+    #   신뢰에 main 이 남아 있으면 main 에서 도는 다른 잡(예: build-deploy 의 build 잡)도
+    #   이 역할을 수임할 수 있다. id-token 권한이 있는 잡에서는 어떤 스텝이든(서드파티 액션
+    #   포함) OIDC 토큰을 새로 받아 sub 가 맞는 역할을 수임할 수 있기 때문이다.
+    #
+    # [A-1] GitHub Environment 로 sub 를 핀하지 않은 이유
+    #   비공개 레포 + Free 요금제에서는 Environment 의 보호 기능(required reviewers,
+    #   deployment branches)이 제공되지 않는다. 보호 규칙 없는 Environment 는 아무 브랜치의
+    #   잡이나 선언할 수 있으므로 sub 를 environment 로 바꿔도 통제가 생기지 않는다.
+    #   → 승인 게이트 대신 "이 역할이 무엇을 읽을 수 있는가"를 줄이는 권한 분리로 방어한다.
+    #   레포 공개 시 적용할 설계: A1 문서 §6 (environment:ci-plan 핀 + required reviewer).
+    #
+    # [Fork PR] 비공개 레포라 외부인이 fork 할 수 없고, fork PR 은 id-token 권한이
+    #   없어 OIDC 토큰을 받지 못한다.
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values = [
-        "repo:${var.github_repo}:pull_request",
-        "repo:${var.github_repo}:ref:refs/heads/main"
-      ]
+      values   = ["repo:${var.github_repo}:pull_request"]
     }
   }
 }
@@ -106,12 +116,20 @@ resource "aws_iam_role" "github_actions_plan" {
 
 # ── ④ Plan 전용 권한 정책 ─────────────────────────────────
 data "aws_iam_policy_document" "plan_permissions" {
-  #checkov:skip=CKV_AWS_356:Describe*/List* 류 읽기 API는 리소스 수준 제한 미지원 — 와일드카드 불가피. 쓰기/시크릿 접근은 별도 statement에서 ARN 한정
-  #checkov:skip=CKV_AWS_108:GetSecretValue는 Okta 시크릿 ARN 한정, KMS Decrypt는 ViaService 조건, S3 GetObject는 state 버킷 한정 — 유출 경로 통제됨
+  # [A-1] checkov 예외(skip) 없음 — 이전의 CKV_AWS_356(kms:Decrypt 를 "*" 에 허용)·
+  #   CKV_AWS_108 예외가 권한 정리로 불필요해졌다. 예외를 등록하는 대신 없앴다.
 
-  # 읽기 — plan은 현재 상태를 읽어 코드와 비교
-  # ※ 대부분의 Describe/List API는 리소스 수준 제한을 지원하지 않아
-  #    resources=["*"]가 불가피 (읽기 전용이라 시크릿 값 노출 없음)
+  # 읽기 — plan 은 현재 상태를 읽어 코드와 비교
+  # ※ 대부분의 Describe/List API 는 리소스 수준 제한을 지원하지 않아 resources=["*"] 가 불가피
+  #
+  # [A-1] 포함 기준 — "CI 가 plan 하는 01·02 가 실제로 쓰는 서비스만"
+  #   이전 주석은 "읽기 전용이라 시크릿 값 노출 없음"이었으나 틀렸다.
+  #   조회 API 도 응답에 비밀을 담을 수 있다:
+  #     cloudfront:GetDistribution(Config)·ListDistributions → 오리진 헤더 X-Origin-Verify 값
+  #     elasticloadbalancing:DescribeRules                   → ALB 규칙 조건의 같은 헤더 값
+  #     wafv2:GetSampledRequests                             → 실제 요청 헤더(세션 쿠키 포함 가능)
+  #   셋 다 03 이 소유한 서비스라 01·02 plan 에는 필요 없다 → 제거.
+  #   logs(01·02 에 로그 그룹 없음)와 config:Get*(설정 이력 내용)도 같은 기준으로 제거.
   statement {
     sid    = "ReadOnlyForPlan"
     effect = "Allow"
@@ -120,11 +138,6 @@ data "aws_iam_policy_document" "plan_permissions" {
       "ec2:Describe*",
       "ec2:GetManagedPrefixListEntries",
       "ec2:GetManagedPrefixListAssociations",
-      "elasticloadbalancing:Describe*",
-      "cloudfront:Get*",
-      "cloudfront:List*",
-      "wafv2:Get*",
-      "wafv2:List*",
       "route53:Get*",
       "route53:List*",
       "acm:Describe*",
@@ -137,10 +150,6 @@ data "aws_iam_policy_document" "plan_permissions" {
       "kms:GetKeyPolicy",
       "kms:GetKeyRotationStatus",
       "kms:ListResourceTags",
-      "logs:Describe*",
-      "logs:Get*",
-      "logs:List*",
-      "logs:ListTagsForResource",
       "cloudtrail:Describe*",
       "cloudtrail:Get*",
       "cloudtrail:List*",
@@ -152,8 +161,7 @@ data "aws_iam_policy_document" "plan_permissions" {
       "securityhub:ListTagsForResource",
       "securityhub:ListEnabledProductsForImport",
       "securityhub:GetEnabledStandards",
-      "config:Describe*",
-      "config:Get*",
+      "config:Describe*", # recorder·channel·status 조회 (설정 이력 내용을 돌려주는 Get* 는 제외)
       "config:ListTagsForResource",
       "inspector2:List*",
       "inspector2:Get*",
@@ -166,8 +174,6 @@ data "aws_iam_policy_document" "plan_permissions" {
       "secretsmanager:DescribeSecret",
       "secretsmanager:ListSecrets",
       "secretsmanager:GetResourcePolicy",
-      "wafv2:ListTagsForResource",
-      "elasticloadbalancing:DescribeTags",
       "tag:GetResources",
       # Stage 5: 02-security ECR repository/lifecycle refresh
       "ecr:DescribeRepositories",
@@ -183,7 +189,18 @@ data "aws_iam_policy_document" "plan_permissions" {
     resources = ["*"]
   }
 
+  # [A-1] 02 의 data "aws_kms_public_key"(서명 공개키 → SSM 발행)가 GetPublicKey 를 호출한다.
+  #   기존 정책에 없어 02 plan 이 이 지점에서 실패했을 가능성이 높다
+  #   (continue-on-error 때문에 체크는 초록이었다). 공개키라 비민감.
+  statement {
+    sid       = "KmsGetPublicKeyForDataSource"
+    effect    = "Allow"
+    actions   = ["kms:GetPublicKey"]
+    resources = ["arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key/*"]
+  }
+
   # SSM 파라미터 — 프로젝트 경로만 (스택 간 참조값 읽기)
+  #   SecureString 파라미터 없음 (2026-10 확인) → 이 경로로 새는 비밀 없음
   statement {
     sid    = "SSMProjectScoped"
     effect = "Allow"
@@ -207,7 +224,7 @@ data "aws_iam_policy_document" "plan_permissions" {
 
   # S3 — 로그/State 버킷 구성 조회 (plan이 버킷 속성을 읽음)
   # 프로젝트 버킷 패턴으로 범위 한정 (CKV_AWS_108 대응)
-  # GetObject/ListBucket은 아래 StateBucketRead에서 state 버킷만 허용
+  # 객체 읽기(GetObject)·목록(ListBucket)은 아래 State 접근 statement 에서 따로 한정
   statement {
     sid    = "S3ReadForPlan"
     effect = "Allow"
@@ -235,66 +252,84 @@ data "aws_iam_policy_document" "plan_permissions" {
     ]
   }
 
-  # State 객체 읽기 — terraform init/plan이 state 파일을 읽음 (GetObject)
-  # ※ S3ReadForPlan에서 GetObject/ListBucket을 분리한 이유:
-  #   객체 읽기는 state 버킷으로만 한정해 데이터 유출 표면 축소 (CKV_AWS_108)
+  # ── State 접근 — CI plan 에 필요한 만큼만 (A-1) ──────────────
+  #
+  # 스택별 state 민감도 (2026-10 평가):
+  #   00  로컬 state (버킷에 없음)                          → 해당 없음
+  #   01  민감정보 없음                                      → 허용
+  #   02  시크릿 값 리소스를 Terraform 관리에서 뺀 뒤 없음   → 허용
+  #   03  Okta 시크릿 2곳 + X-Origin-Verify 3곳             → 차단 (plan 은 로컬에서만)
+  #   04·05  민감정보 없음, 임시 스택이라 CI plan 대상 아님  → 차단 (불필요)
+
+  # State 객체 읽기 — 01·02 두 파일만
   statement {
-    sid    = "StateBucketRead"
-    effect = "Allow"
-    actions = [
-      "s3:GetObject",
-      "s3:ListBucket"
-    ]
-    resources = [
-      aws_s3_bucket.terraform_state.arn,
-      "${aws_s3_bucket.terraform_state.arn}/*"
-    ]
+    sid       = "StateObjectReadPersistentStacks"
+    effect    = "Allow"
+    actions   = ["s3:GetObject"]
+    resources = [for k in local.plan_state_keys : "${aws_s3_bucket.terraform_state.arn}/${k}"]
   }
 
-  # State Lock — plan도 lock을 잡으므로 DynamoDB 쓰기 필요
+  # 버킷 목록 조회 — 워크스페이스 접두어(env:/)만
+  #   Terraform S3 백엔드는 init·plan 때 워크스페이스 목록을 "env:/" 접두어로 조회한다.
+  #   그 외 접두어(예: stacks/03-workload/)와 전체 목록은 거부된다.
+  #   ⚠ 부수 효과: 없는 객체를 GetObject/HeadObject 하면 404 가 아니라 403 이 온다
+  #     (ListBucket 이 없으면 S3 가 존재 여부를 숨긴다). 거부 증명은 정책 시뮬레이터로 한다.
   statement {
-    sid    = "StateLock"
-    effect = "Allow"
-    actions = [
-      "dynamodb:GetItem",
-      "dynamodb:PutItem",
-      "dynamodb:DeleteItem",
-      "dynamodb:DescribeTable" # 테이블 상태 확인 (간헐 실패 방지)
-    ]
+    sid       = "StateBucketListWorkspacePrefixOnly"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.terraform_state.arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["env:/*"]
+    }
+  }
+
+  # 잠금 테이블 — 무결성 다이제스트 읽기만
+  #   CI plan 은 -lock=false 로 돈다 → 잠금 항목을 쓰지 않는다 (PutItem/DeleteItem 없음).
+  #   S3 백엔드는 state 를 읽을 때 "<버킷>/<키>-md5" 다이제스트를 대조하므로 GetItem 만
+  #   필요하고, 그것도 01·02 다이제스트 항목으로만 한정한다.
+  #   Null=false: ForAllValues 는 키가 아예 없으면 참으로 판정되므로, 키가 반드시
+  #   있어야 하도록 짝으로 둔다 (AWS 권장 패턴).
+  statement {
+    sid       = "StateDigestReadPersistentStacks"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem"]
+    resources = [aws_dynamodb_table.terraform_lock.arn]
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "dynamodb:LeadingKeys"
+      values   = [for k in local.plan_state_keys : "${aws_s3_bucket.terraform_state.bucket}/${k}-md5"]
+    }
+    condition {
+      test     = "Null"
+      variable = "dynamodb:LeadingKeys"
+      values   = ["false"]
+    }
+  }
+
+  statement {
+    sid       = "StateLockTableDescribe"
+    effect    = "Allow"
+    actions   = ["dynamodb:DescribeTable"] # 테이블 상태 확인 (간헐 실패 방지)
     resources = [aws_dynamodb_table.terraform_lock.arn]
   }
 
-  # ── 시크릿 복호화 — ★ 최소 권한으로 제한 (코드리뷰 핵심 반영) ──
-  # 03-workload plan 시 data source가 Okta 시크릿을 읽음
-  # 변경 전: resources=["*"] → 계정 모든 시크릿 읽기 가능 (위험)
-  # 변경 후: 프로젝트 Okta 시크릿 ARN으로 한정
-  statement {
-    sid    = "GetOktaSecretOnly"
-    effect = "Allow"
-    actions = [
-      "secretsmanager:GetSecretValue"
-    ]
-    resources = [
-      "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${var.project_name}/okta/*"
-    ]
-  }
+  # ── 시크릿 — 의도적 부재 (A-1) ──────────────────────────────
+  # 이전에는 secretsmanager:GetSecretValue(Okta) + kms:Decrypt(SM 경유)가 있었다.
+  #   · 03 plan 의 데이터 소스, 02 plan 의 시크릿 버전 refresh 가 이 권한을 썼다.
+  #   · 이 권한이 있는 한 PR 에 들어간 코드가 실제 현재 값을 바로 읽을 수 있다.
+  # → 03 을 CI plan 에서 빼고, 02 는 시크릿 "그릇"만 관리하게 바꿔 권한 자체를 없앴다.
+  #   다시 필요해 보이면 그 plan 을 CI 가 아니라 로컬에서 하는 게 맞다.
+}
 
-  # KMS Decrypt — Secrets Manager 경유로만 허용 (ViaService 조건)
-  # 변경 전: resources=["*"] → 모든 키로 모든 데이터 복호화 가능 (위험)
-  # 변경 후: Secrets Manager를 통한 복호화만 허용 (로그 키 등은 불가)
-  statement {
-    sid    = "DecryptViaSecretsManagerOnly"
-    effect = "Allow"
-    actions = [
-      "kms:Decrypt"
-    ]
-    resources = ["*"]
-    condition {
-      test     = "StringEquals"
-      variable = "kms:ViaService"
-      values   = ["secretsmanager.${var.aws_region}.amazonaws.com"]
-    }
-  }
+# CI plan 이 읽을 수 있는 state — 영속 스택 중 시크릿을 품지 않는 01·02 만 (A-1)
+locals {
+  plan_state_keys = [
+    "stacks/01-network/terraform.tfstate",
+    "stacks/02-security/terraform.tfstate",
+  ]
 }
 
 resource "aws_iam_role_policy" "plan_permissions" {

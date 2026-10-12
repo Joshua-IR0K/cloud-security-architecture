@@ -1,13 +1,24 @@
 # ============================================================
 # .github/workflows/terraform-plan.yml
 # ============================================================
-# main으로 향하는 PR에서 terraform plan 자동 실행
-# OIDC로 임시 자격증명 획득 (장기 키 없음)
-# 방향 A: plan 전용 — apply는 로컬에서 수동
+# main 으로 향하는 PR 에서 영속 스택(01·02)의 terraform plan 을 실행한다.
+# OIDC 로 임시 자격증명 획득 (장기 키 없음). apply 는 로컬에서 수동.
 #
-# 사전 준비:
-#   레포 Settings → Secrets and variables → Actions → Variables
-#   → AWS_ROLE_ARN 변수에 bootstrap output의 Role ARN 등록
+# [A-1, 2026-10] plan 신원 최소권한 — 멘토 피드백 ②
+#   · plan 대상: 01-network · 02-security 만
+#       03 제외 — 03 state 에 Okta 시크릿·X-Origin-Verify 가 저장돼 있어 03 을 plan 하는
+#       순간 CI 신원이 시크릿을 읽게 된다. 03 은 매 사이클 지우는 임시 스택이므로
+#       plan 은 로컬에서만 한다 (04·05 를 뺀 D14 와 같은 원칙).
+#   · Least privilege guard: CI 신원으로 허용 2 / 거부 9 를 실제로 시도한다.
+#       통제는 IAM 정책(00, 로컬 apply)이고, 가드는 그 통제가 다시 넓어지는 것을
+#       PR 에서 바로 잡아내는 회귀 탐지다. 가드를 지워도 통제는 남는다.
+#   · plan 실패 = 잡 실패: 이전엔 continue-on-error 때문에 plan 이 실패해도 체크가
+#       초록이었다. 이제 체크 색이 곧 plan 결과다.
+#   · -lock=false: CI plan 은 참고용 읽기 전용이다. 잠금 테이블에 쓰지 않는다 (A1 문서 §5).
+#   · 모든 액션을 커밋 SHA 로 고정 (Dependabot 이 갱신 PR 을 올린다).
+#   · paths 필터 제거: 모든 PR 에서 가드가 돌아 경계를 상시 확인한다.
+#
+# 사전 준비: Repository Variables — AWS_ROLE_ARN(plan 역할), DOMAIN_NAME
 # ============================================================
 
 name: Terraform Plan
@@ -15,48 +26,145 @@ name: Terraform Plan
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "01-network/**"
-      - "02-security/**"
-      - "03-workload/**"
 
 # ★ OIDC 토큰 발급에 필수
 permissions:
-  id-token: write   # OIDC 토큰 수신
-  contents: read    # 레포 체크아웃
-  pull-requests: write  # PR에 plan 결과 코멘트
+  id-token: write       # OIDC 토큰 수신
+  contents: read        # 레포 체크아웃
+  pull-requests: write  # PR 에 plan 결과 코멘트
 
 env:
   AWS_REGION: ap-northeast-2
-  # 비민감 변수는 TF_VAR_ 환경변수로 주입 (tfvars는 git 제외되므로)
-  # 레포 Variables에 DOMAIN_NAME 등록 필요
+  PROJECT: devsecops-project
+  # 비민감 변수는 TF_VAR_ 환경변수로 주입 (tfvars 는 git 제외)
   TF_VAR_domain_name: ${{ vars.DOMAIN_NAME }}
 
 jobs:
+  # ── CI 신원의 권한 경계를 실제 호출로 확인 ─────────────────
+  guard:
+    name: Least privilege guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS Credentials (OIDC, plan role)
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a  # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-plan-guard
+
+      # 거부 9 = "엣지 인증 경계(Okta·X-Origin-Verify)에 닿는 알려진 경로" + 잠금 쓰기
+      #   state(03) · Secrets Manager · CloudFront 설정 · ALB 규칙 · WAF 샘플 요청
+      # ⚠ S3 거부(03·05 state)는 403 으로 판정한다. ListBucket 이 없으면 객체가 없어도
+      #   403 이 오므로, 이 가드는 "객체가 존재할 때" 의미가 있다(destroy 후에도 state
+      #   객체는 남는다). 객체 존재와 무관한 증명은 정책 시뮬레이터로 했다 (A1 문서 §7).
+      - name: Verify plan role boundary (allow 2 / deny 9)
+        run: |
+          set -uo pipefail
+
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET="${PROJECT}-terraform-state-${ACCOUNT}"
+          LOCK_TABLE="${PROJECT}-terraform-lock"
+          OKTA_ARN=$(aws ssm get-parameter --name "/${PROJECT}/security/okta_secret_arn" \
+            --query Parameter.Value --output text)
+          if [ -z "$ACCOUNT" ] || [ -z "$OKTA_ARN" ]; then
+            echo "::error::가드 준비 실패 — 계정 ID 또는 Okta 시크릿 ARN 을 얻지 못함"
+            exit 1
+          fi
+          # 존재하지 않는 리소스 식별자 — 권한이 없으면 AccessDenied, 있으면 NotFound 가 온다.
+          # 권한이 다시 열리면 "판정 불가"로 실패하므로 안전한 쪽으로 틀린다.
+          FAKE_CF_ID="E000000GUARD00"
+          FAKE_LISTENER="arn:aws:elasticloadbalancing:${AWS_REGION}:${ACCOUNT}:listener/app/guard-probe/0123456789abcdef/0123456789abcdef"
+          fail=0
+
+          # 허용이어야 하는 호출 — 성공해야 PASS
+          allow() {
+            local desc="$1"; shift
+            if "$@" >/dev/null 2>&1; then
+              echo "  yes  ${desc}"
+            else
+              echo "::error::기대=허용, 실제=실패 — ${desc}"; fail=1
+            fi
+          }
+
+          # 거부여야 하는 호출 — AccessDenied 또는 403 이어야 PASS
+          #   ⚠ stdout 은 버린다. 권한이 열려 있어도 시크릿·헤더 값이 로그에 남지 않게.
+          deny() {
+            local desc="$1"; shift
+            local err
+            if err=$("$@" 2>&1 >/dev/null); then
+              echo "::error::기대=거부, 실제=허용 — ${desc} (권한 과다)"; fail=1
+            elif grep -qE 'AccessDenied|\(403\)' <<<"$err"; then
+              echo "  no   ${desc}"
+            else
+              echo "::error::기대=거부, 판정 불가 — ${desc}"; head -3 <<<"$err"; fail=1
+            fi
+          }
+
+          echo "== 허용 — CI plan 에 필요한 것 =="
+          allow "01 state 읽기" \
+            aws s3api head-object --bucket "$BUCKET" --key stacks/01-network/terraform.tfstate
+          allow "02 state 읽기" \
+            aws s3api head-object --bucket "$BUCKET" --key stacks/02-security/terraform.tfstate
+
+          echo "== 거부 — state·시크릿 =="
+          deny "03 state 읽기 (Okta 시크릿·X-Origin-Verify 보유)" \
+            aws s3api head-object --bucket "$BUCKET" --key stacks/03-workload/terraform.tfstate
+          deny "05 state 읽기 (CI plan 대상 아님)" \
+            aws s3api head-object --bucket "$BUCKET" --key stacks/05-k8s/terraform.tfstate
+          deny "03 경로 목록 조회" \
+            aws s3api list-objects-v2 --bucket "$BUCKET" --prefix stacks/03-workload/ --max-items 1
+          deny "Okta 시크릿 값 읽기" \
+            aws secretsmanager get-secret-value --secret-id "$OKTA_ARN"
+
+          echo "== 거부 — 같은 값을 '설정 조회'로 돌려주는 API =="
+          deny "CloudFront 배포 목록 (오리진 헤더 포함)" \
+            aws cloudfront list-distributions --max-items 1
+          deny "CloudFront 배포 설정 (오리진 헤더 포함)" \
+            aws cloudfront get-distribution-config --id "$FAKE_CF_ID"
+          deny "ALB 리스너 규칙 (헤더 조건 값 포함)" \
+            aws elbv2 describe-rules --listener-arn "$FAKE_LISTENER"
+          deny "WAF 조회 (샘플 요청에 실제 요청 헤더 포함)" \
+            aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1 --limit 1
+
+          echo "== 거부 — 쓰기 =="
+          # 조건식이 항상 거짓이라 권한이 있어도 실제로는 쓰이지 않는다 (부작용 없는 탐침)
+          deny "잠금 테이블 쓰기" \
+            aws dynamodb put-item --table-name "$LOCK_TABLE" \
+              --item '{"LockID":{"S":"guard-probe"}}' \
+              --condition-expression "attribute_exists(LockID)"
+
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::plan 역할의 권한 경계가 설계와 다르다 — plan 을 실행하지 않는다"
+            exit 1
+          fi
+          echo "== 허용 2 / 거부 9 — 경계 확인 완료 =="
+
+  # ── 영속 스택 plan ─────────────────────────────────────────
   plan:
     name: Plan ${{ matrix.stack }}
+    needs: guard
     runs-on: ubuntu-latest
 
     # 각 스택을 병렬 plan (한 스택 실패해도 나머지는 진행)
     strategy:
       fail-fast: false
       matrix:
-        stack: ["01-network", "02-security", "03-workload"]
+        stack: ["01-network", "02-security"]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
-      # ★ OIDC로 AWS 임시 자격증명 획득 (장기 키 없음)
-      - name: Configure AWS Credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      # ★ OIDC 로 AWS 임시 자격증명 획득 (장기 키 없음)
+      - name: Configure AWS Credentials (OIDC, plan role)
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a  # v4.3.1
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}  # Repository Variable 참조
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-plan-${{ matrix.stack }}
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd  # v3.1.2
         with:
           terraform_version: "1.14.0"
 
@@ -68,15 +176,17 @@ jobs:
         working-directory: ${{ matrix.stack }}
         run: terraform validate
 
+      # -lock=false: CI plan 은 참고용 읽기 전용 → 잠금 테이블에 쓰지 않는다.
+      #   plan 시점 state 가 최신이라는 보장은 하지 않는다 (A1 문서 §5 의 4가지 조건).
       - name: Terraform Plan
         id: plan
         working-directory: ${{ matrix.stack }}
-        run: terraform plan -input=false -no-color
-        continue-on-error: true
+        run: terraform plan -input=false -no-color -lock=false
+        continue-on-error: true  # 결과 코멘트는 남기고, 마지막 스텝에서 잡을 실패시킨다
 
       # plan 결과를 PR 코멘트로 게시
       - name: Comment Plan Result
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7.1.0
         if: github.event_name == 'pull_request'
         with:
           script: |
@@ -84,9 +194,17 @@ jobs:
             const outcome = '${{ steps.plan.outcome }}';
             const emoji = outcome === 'success' ? '✅' : '⚠️';
             const body = `${emoji} **Terraform Plan — \`${stack}\`**: \`${outcome}\``;
-            github.rest.issues.createComment({
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: body
             });
+
+      # 이전엔 continue-on-error 때문에 plan 이 실패해도 체크가 초록으로 끝났다.
+      # → 체크 색이 곧 plan 결과가 되도록 한다.
+      - name: Fail if plan failed
+        if: steps.plan.outcome == 'failure'
+        run: |
+          echo "::error::terraform plan 실패 (${{ matrix.stack }}) — 위 Terraform Plan 로그 확인"
+          exit 1
