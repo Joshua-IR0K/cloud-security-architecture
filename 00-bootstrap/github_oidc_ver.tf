@@ -25,7 +25,8 @@
 #       · 시크릿 경로 제거: Okta GetSecretValue · KMS Decrypt
 #         + 같은 값을 '설정 조회'로 돌려주는 서비스 제거: CloudFront · ELB · WAF
 #       · 01·02 가 쓰지 않는 서비스 제거: logs / 설정 이력(config:Get*)
-#       · 추가: kms:GetPublicKey — 02 의 aws_kms_public_key 데이터 소스용 (공개키, 비민감)
+#       · 추가: kms:GetPublicKey — 02 의 aws_kms_public_key 데이터 소스용 (공개키, 비민감, 누락으로 02 plan 실패 확인)
+#       · 추가: 02 로그 버킷 4개의 s3:ListBucket — 버킷 존재 확인용 (없으면 CI 가 '삭제됨'으로 오판)
 #
 # ============================================================
 
@@ -190,8 +191,9 @@ data "aws_iam_policy_document" "plan_permissions" {
   }
 
   # [A-1] 02 의 data "aws_kms_public_key"(서명 공개키 → SSM 발행)가 GetPublicKey 를 호출한다.
-  #   기존 정책에 없어 02 plan 이 이 지점에서 실패했을 가능성이 높다
-  #   (continue-on-error 때문에 체크는 초록이었다). 공개키라 비민감.
+  #   기존 정책에 없어 02 plan 이 이 지점에서 실패했다 — AccessDeniedException on
+  #   kms:GetPublicKey (2026-10-06 CI 로그). continue-on-error 때문에 체크는 초록이었다.
+  #   공개키라 비민감.
   statement {
     sid       = "KmsGetPublicKeyForDataSource"
     effect    = "Allow"
@@ -224,7 +226,9 @@ data "aws_iam_policy_document" "plan_permissions" {
 
   # S3 — 로그/State 버킷 구성 조회 (plan이 버킷 속성을 읽음)
   # 프로젝트 버킷 패턴으로 범위 한정 (CKV_AWS_108 대응)
-  # 객체 읽기(GetObject)·목록(ListBucket)은 아래 State 접근 statement 에서 따로 한정
+  # 객체 읽기(GetObject)는 state 두 파일만, 목록(ListBucket)은 아래 두 statement 에서 따로 한정
+  #   ⚠ 이 statement 에 ListBucket 을 넣지 않는다 — resources 가 state 버킷까지 포함해
+  #     state 버킷 전체 목록이 열린다 (statement 는 OR 로 합쳐진다)
   statement {
     sid    = "S3ReadForPlan"
     effect = "Allow"
@@ -249,6 +253,24 @@ data "aws_iam_policy_document" "plan_permissions" {
     resources = [
       "arn:aws:s3:::${var.project_name}-*",
       "arn:aws:s3:::aws-waf-logs-${var.project_name}-*"
+    ]
+  }
+
+  # 02 로그 버킷 존재 확인 — s3:ListBucket (A-1, 2026-10-12)
+  #   aws_s3_bucket 의 refresh 는 HeadBucket 으로 버킷 존재를 확인하고, HeadBucket 은
+  #   s3:ListBucket 권한을 요구한다. 이 권한이 없을 때 CI plan 은 실패하지 않고 4개 버킷을
+  #   "없음"으로 보고 재생성 + 딸린 리소스 15개 교체를 계획했다 (23 add / 4 change / 19 destroy,
+  #   로컬 plan 은 No changes). 에러 없이 틀린 plan — 실패보다 위험하다.
+  #   범위: 로그 버킷 4개만. 객체 이름 목록만 보이고 내용(GetObject)은 여전히 막혀 있다.
+  statement {
+    sid     = "LogBucketExistenceForPlan"
+    effect  = "Allow"
+    actions = ["s3:ListBucket"]
+    resources = [
+      "arn:aws:s3:::${var.project_name}-cloudtrail-${data.aws_caller_identity.current.account_id}",
+      "arn:aws:s3:::${var.project_name}-config-${data.aws_caller_identity.current.account_id}",
+      "arn:aws:s3:::${var.project_name}-flow-logs-${data.aws_caller_identity.current.account_id}",
+      "arn:aws:s3:::aws-waf-logs-${var.project_name}-${data.aws_caller_identity.current.account_id}",
     ]
   }
 
