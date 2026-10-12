@@ -37,24 +37,14 @@ resource "aws_secretsmanager_secret" "okta_oidc" {
   }
 }
 
-# ── 초기 플레이스홀더 값 ──────────────────────────────────
-# Terraform은 빈 골격만 생성. 실제 값은 CLI로 주입.
-# ignore_changes로 이후 값 변경을 Terraform이 추적하지 않음
-resource "aws_secretsmanager_secret_version" "okta_oidc" {
-  secret_id = aws_secretsmanager_secret.okta_oidc.id
-
-  secret_string = jsonencode({
-    issuer_url    = "PLACEHOLDER_REPLACE_VIA_CLI"
-    client_id     = "PLACEHOLDER_REPLACE_VIA_CLI"
-    client_secret = "PLACEHOLDER_REPLACE_VIA_CLI"
-  })
+removed {
+  from = aws_secretsmanager_secret_version.okta_oidc
 
   lifecycle {
-    # 실제 값은 CLI로 주입되므로, Terraform은 값 변경을 무시
-    # 이게 없으면 apply마다 플레이스홀더로 덮어씀
-    ignore_changes = [secret_string]
+    destroy = false
   }
 }
+
 
 # ──────────────────────────────────────────────────────────
 # 실제 Okta 값 주입 명령 (apply 후 1회 실행):
