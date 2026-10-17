@@ -1,5 +1,5 @@
 # ============================================================
-# 00-bootstrap/github_oidc_ver0.2.tf — GitHub Actions OIDC, plan 역할 (장기 키 제거)
+# 00-bootstrap/github_oidc_ver.tf — GitHub Actions OIDC, plan 역할 (장기 키 제거)
 # ============================================================
 #
 # 목적: GitHub Actions가 AWS에 접근할 때 장기 Access Key 없이
@@ -27,6 +27,8 @@
 #       · 01·02 가 쓰지 않는 서비스 제거: logs / 설정 이력(config:Get*)
 #       · 추가: kms:GetPublicKey — 02 의 aws_kms_public_key 데이터 소스용 (공개키, 비민감, 누락으로 02 plan 실패 확인)
 #       · 추가: 02 로그 버킷 4개의 s3:ListBucket — 버킷 존재 확인용 (없으면 CI 가 '삭제됨'으로 오판)
+#   - [멘토 ⑤, 2026-10] 02 에 EKS 컨트롤플레인 로그 그룹 추가 → 로그 그룹 '메타데이터' 조회만 다시 허용
+#       · logs:DescribeLogGroups · ListTagsForResource · ListTagsLogGroup (로그 내용을 읽는 Get*·Filter* 는 계속 제외)
 #
 # ============================================================
 
@@ -130,7 +132,9 @@ data "aws_iam_policy_document" "plan_permissions" {
   #     elasticloadbalancing:DescribeRules                   → ALB 규칙 조건의 같은 헤더 값
   #     wafv2:GetSampledRequests                             → 실제 요청 헤더(세션 쿠키 포함 가능)
   #   셋 다 03 이 소유한 서비스라 01·02 plan 에는 필요 없다 → 제거.
-  #   logs(01·02 에 로그 그룹 없음)와 config:Get*(설정 이력 내용)도 같은 기준으로 제거.
+  #   config:Get*(설정 이력 내용)도 같은 기준으로 제거.
+  #   logs: 02 에 EKS 컨트롤플레인 로그 그룹이 생겨 메타데이터 조회만 허용한다.
+  #     로그 내용(GetLogEvents·FilterLogEvents·StartQuery)은 감사 기록 자체라 계속 제외 — 가드가 확인.
   statement {
     sid    = "ReadOnlyForPlan"
     effect = "Allow"
@@ -151,6 +155,10 @@ data "aws_iam_policy_document" "plan_permissions" {
       "kms:GetKeyPolicy",
       "kms:GetKeyRotationStatus",
       "kms:ListResourceTags",
+      # 02 의 aws_cloudwatch_log_group refresh (메타데이터만 — 내용 읽기 권한 아님)
+      "logs:DescribeLogGroups",
+      "logs:ListTagsForResource",
+      "logs:ListTagsLogGroup",
       "cloudtrail:Describe*",
       "cloudtrail:Get*",
       "cloudtrail:List*",

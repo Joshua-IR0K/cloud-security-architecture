@@ -25,6 +25,7 @@ data "aws_region" "current" {}
 # 키 ①: 로그 암호화 키 (S3 로그 버킷용)
 # ============================================================
 # 용도: CloudTrail, Config, VPC Flow Logs, WAF Logs의 S3 암호화
+#       + EKS 컨트롤 플레인 로그 그룹 (CloudWatch Logs, eks_control_plane_logs.tf)
 resource "aws_kms_key" "logs" {
   description             = "${var.project_name} - S3 log buckets encryption"
   deletion_window_in_days = 7     # 삭제 요청 후 7일 대기 (실수 방지)
@@ -96,6 +97,30 @@ resource "aws_kms_key" "logs" {
           "kms:GenerateDataKey*"
         ]
         Resource = "*"
+      },
+      {
+        # EKS 컨트롤 플레인 로그 그룹 (CloudWatch Logs) — 멘토 ⑤
+        # CloudWatch Logs 는 리전 서비스 주체(logs.<region>)로 키를 쓴다.
+        # 암호화 컨텍스트(aws:logs:arn)로 이 로그 그룹 하나에만 한정 —
+        # 같은 계정의 다른 로그 그룹이 이 키를 가져다 쓰지 못한다.
+        Sid    = "AllowCloudWatchLogsForEksControlPlane"
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.${data.aws_region.current.name}.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt*",
+          "kms:Decrypt*",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:Describe*"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnEquals = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/eks/${var.eks_cluster_name}/cluster"
+          }
+        }
       }
     ]
   })

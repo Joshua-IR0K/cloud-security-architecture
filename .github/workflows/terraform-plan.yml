@@ -9,7 +9,7 @@
 #       03 제외 — 03 state 에 Okta 시크릿·X-Origin-Verify 가 저장돼 있어 03 을 plan 하는
 #       순간 CI 신원이 시크릿을 읽게 된다. 03 은 매 사이클 지우는 임시 스택이므로
 #       plan 은 로컬에서만 한다 (04·05 를 뺀 D14 와 같은 원칙).
-#   · Least privilege guard: CI 신원으로 허용 3 / 거부 9 를 실제로 시도한다.
+#   · Least privilege guard: CI 신원으로 허용 3 / 거부 10 을 실제로 시도한다.
 #       통제는 IAM 정책(00, 로컬 apply)이고, 가드는 그 통제가 다시 넓어지는 것을
 #       PR 에서 바로 잡아내는 회귀 탐지다. 가드를 지워도 통제는 남는다.
 #   · plan 실패 = 잡 실패: 이전엔 continue-on-error 때문에 plan 이 실패해도 체크가
@@ -57,7 +57,7 @@ jobs:
       # ⚠ S3 거부(03·05 state)는 403 으로 판정한다. ListBucket 이 없으면 객체가 없어도
       #   403 이 오므로, 이 가드는 "객체가 존재할 때" 의미가 있다(destroy 후에도 state
       #   객체는 남는다). 객체 존재와 무관한 증명은 정책 시뮬레이터로 했다 (A1 문서 §7).
-      - name: Verify plan role boundary (allow 3 / deny 9)
+      - name: Verify plan role boundary (allow 3 / deny 10)
         run: |
           set -uo pipefail
 
@@ -130,6 +130,12 @@ jobs:
           deny "WAF 조회 (샘플 요청에 실제 요청 헤더 포함)" \
             aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1 --limit 1
 
+          echo "== 거부 — 감사 기록 내용 =="
+          # plan 에는 로그 그룹 메타데이터 조회만 필요하다. 감사 로그 내용은 "누가 무엇을 했나"
+          # 그 자체라 CI 가 읽으면 안 된다. (그룹이 없어도 권한이 없으면 AccessDenied 가 먼저 온다)
+          deny "EKS 감사 로그 내용 읽기" \
+            aws logs filter-log-events --log-group-name "/aws/eks/joshua-eks/cluster" --limit 1
+
           echo "== 거부 — 쓰기 =="
           # 조건식이 항상 거짓이라 권한이 있어도 실제로는 쓰이지 않는다 (부작용 없는 탐침)
           deny "잠금 테이블 쓰기" \
@@ -141,7 +147,7 @@ jobs:
             echo "::error::plan 역할의 권한 경계가 설계와 다르다 — plan 을 실행하지 않는다"
             exit 1
           fi
-          echo "== 허용 3 / 거부 9 — 경계 확인 완료 =="
+          echo "== 허용 3 / 거부 10 — 경계 확인 완료 =="
 
   # ── 영속 스택 plan ─────────────────────────────────────────
   plan:

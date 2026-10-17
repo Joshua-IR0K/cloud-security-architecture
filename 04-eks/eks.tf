@@ -15,6 +15,14 @@
 #   (IMDS hop-limit, 노드롤, LT)의 코드 가시성이 이 포트폴리오의 목적
 # ============================================================
 
+# ── 선행 조건: 02 가 만든 컨트롤플레인 로그 그룹 ─────────────
+# 없으면 plan 이 여기서 실패한다 (02 apply 누락을 클러스터 생성 전에 잡는다).
+# 그대로 진행되면 EKS 가 보존 기한·암호화 없는 그룹을 직접 만들고,
+# 이후 02 apply 가 "이미 존재"로 실패하는 꼬임이 생긴다.
+data "aws_cloudwatch_log_group" "eks_control_plane" {
+  name = "/aws/eks/${var.cluster_name}/cluster"
+}
+
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
@@ -64,13 +72,16 @@ module "eks" {
     }
   }
 
-  # ── 컨트롤플레인 로깅: 비활성 (S3-only 로깅 원칙 + 사이클 churn 방지) ──
-  # EKS 컨트롤플레인 로그의 유일한 네이티브 목적지는 CloudWatch 인데,
-  # 프로젝트 원칙이 "CW 를 1차 로그 저장소로 쓰지 않음".
-  # Stage 8 의 GuardDuty EKS Protection 은 audit 스트림을 CW 와 무관하게
-  # 직접 소비하므로 이 설정이 탐지 커버리지를 깎지 않음.
-  # (authenticator 디버깅이 필요해지면 그때만 일시 활성 — 의식적 트레이드오프)
-  enabled_log_types           = []
+  # ── 컨트롤플레인 로깅: audit · authenticator (멘토 ⑤, 2026-10) ──
+  # 이전 결정: 비활성 — 유일한 네이티브 목적지가 CloudWatch 라 S3-only 원칙과 충돌,
+  #   탐지는 GuardDuty EKS Protection 이 audit 스트림을 직접 소비해 커버.
+  # 바꾼 이유: 탐지는 되지만 Finding 을 조사할 원본(누가 어떤 API 를 불렀나)이 없었다.
+  #   → CloudWatch 를 "CloudWatch 만 받을 수 있는 로그에 한해 단기 보관"으로 예외 허용.
+  # 로그 그룹은 02-security 가 소유한다 (보존 14일, logs 키 암호화).
+  #   모듈이 만들면 04 destroy 때 증적도 사라진다 → create_cloudwatch_log_group = false 유지.
+  #   EKS 는 이름이 고정된 /aws/eks/<cluster>/cluster 에 쓰므로 02 의 그룹으로 들어간다.
+  #   그룹이 없으면 EKS 가 보존·암호화 없이 직접 만들어 버린다 → 파일 위쪽 데이터 소스로 plan 에서 막는다.
+  enabled_log_types           = ["audit", "authenticator"]
   create_cloudwatch_log_group = false
 
   # ── 시크릿 암호화: 모듈 KMS 키 생성 안 함 (키 churn 방지) ──
