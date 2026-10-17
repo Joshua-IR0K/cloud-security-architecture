@@ -29,6 +29,10 @@
 #       · 추가: 02 로그 버킷 4개의 s3:ListBucket — 버킷 존재 확인용 (없으면 CI 가 '삭제됨'으로 오판)
 #   - [멘토 ⑤, 2026-10] 02 에 EKS 컨트롤플레인 로그 그룹 추가 → 로그 그룹 '메타데이터' 조회만 다시 허용
 #       · logs:DescribeLogGroups · ListTagsForResource · ListTagsLogGroup (로그 내용을 읽는 Get*·Filter* 는 계속 제외)
+#   - [멘토 ③, 2026-10] 02 에 Athena 조사 계층 추가 → 카탈로그·워크그룹 '메타데이터' 조회만 허용
+#       · glue: GetDatabase · GetTable · GetPartitionIndexes · GetTags (security_logs DB 로 한정)
+#       · athena: GetWorkGroup · GetNamedQuery · ListTagsForResource (보안 워크그룹으로 한정)
+#       · 결과 버킷 s3:ListBucket (존재 확인용). 쿼리 실행·결과 읽기는 계속 제외 — 가드가 쿼리 실행 거부를 확인
 #
 # ============================================================
 
@@ -269,7 +273,7 @@ data "aws_iam_policy_document" "plan_permissions" {
   #   s3:ListBucket 권한을 요구한다. 이 권한이 없을 때 CI plan 은 실패하지 않고 4개 버킷을
   #   "없음"으로 보고 재생성 + 딸린 리소스 15개 교체를 계획했다 (23 add / 4 change / 19 destroy,
   #   로컬 plan 은 No changes). 에러 없이 틀린 plan — 실패보다 위험하다.
-  #   범위: 로그 버킷 4개만. 객체 이름 목록만 보이고 내용(GetObject)은 여전히 막혀 있다.
+  #   범위: 로그 버킷 4개 + Athena 결과 버킷(멘토 ③). 객체 이름 목록만 보이고 내용(GetObject)은 여전히 막혀 있다.
   statement {
     sid     = "LogBucketExistenceForPlan"
     effect  = "Allow"
@@ -279,6 +283,41 @@ data "aws_iam_policy_document" "plan_permissions" {
       "arn:aws:s3:::${var.project_name}-config-${data.aws_caller_identity.current.account_id}",
       "arn:aws:s3:::${var.project_name}-flow-logs-${data.aws_caller_identity.current.account_id}",
       "arn:aws:s3:::aws-waf-logs-${var.project_name}-${data.aws_caller_identity.current.account_id}",
+      "arn:aws:s3:::${var.project_name}-athena-results-${data.aws_caller_identity.current.account_id}",
+    ]
+  }
+
+  # Athena 조사 계층 (02 athena.tf) refresh — 메타데이터만 (멘토 ③, 2026-10)
+  #   provider 5.100.0 의 refresh 가 실제로 부르는 API 만 넣었다:
+  #     glue_catalog_database = GetDatabase + GetTags / glue_catalog_table = GetTable + GetPartitionIndexes
+  #     athena_workgroup = GetWorkGroup + ListTagsForResource / athena_named_query = GetNamedQuery
+  #   로그 내용에 닿는 경로(StartQueryExecution·GetQueryResults, 결과 버킷 GetObject)는 없다 — 가드가 쿼리 실행 거부를 확인.
+  statement {
+    sid    = "AthenaCatalogMetadataForPlan"
+    effect = "Allow"
+    actions = [
+      "glue:GetDatabase",
+      "glue:GetTable",
+      "glue:GetPartitionIndexes",
+      "glue:GetTags",
+    ]
+    resources = [
+      "arn:aws:glue:${var.aws_region}:${data.aws_caller_identity.current.account_id}:catalog",
+      "arn:aws:glue:${var.aws_region}:${data.aws_caller_identity.current.account_id}:database/security_logs",
+      "arn:aws:glue:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/security_logs/*",
+    ]
+  }
+
+  statement {
+    sid    = "AthenaWorkgroupMetadataForPlan"
+    effect = "Allow"
+    actions = [
+      "athena:GetWorkGroup",
+      "athena:GetNamedQuery",
+      "athena:ListTagsForResource",
+    ]
+    resources = [
+      "arn:aws:athena:${var.aws_region}:${data.aws_caller_identity.current.account_id}:workgroup/${var.project_name}-security",
     ]
   }
 
