@@ -6,6 +6,7 @@
 #   1. GitHub Actions 버전 추적 (actions/checkout 등이
 #      구버전·취약 버전이 되면 업데이트 PR 자동 생성)
 #   2. Terraform Provider 버전 추적 (aws provider 등)
+#   3. 컨테이너 베이스 이미지 추적 (images/s5-good 의 FROM tag@digest — 3단계)
 #
 # 업데이트 PR도 우리 CI(plan + checkov)를 통과해야 머지
 # → 의존성 업데이트조차 검증 게이트를 거치는 구조
@@ -36,3 +37,20 @@ updates:
     labels:
       - "dependencies"
       - "terraform"
+
+  # 컨테이너 베이스 이미지 (3단계) — 서비스 이미지만
+  #   Dockerfile 의 FROM tag@digest 를 함께 올리는 PR 을 만든다 → 머지 후 CI 의 Trivy 게이트가 검증.
+  #   업스트림이 매주 같은 태그를 재빌드하므로 digest 만 바뀌는 PR 이 주기적으로 오는 게 정상이다.
+  #   images/s5-vuln 은 "의도적으로 낡은" 스캐너 대조군(S5)이라 대상에서 뺀다.
+  - package-ecosystem: "docker"
+    directory: "/images/s5-good"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "docker"
+    ignore:
+      # nginx 는 짝수 minor = stable, 홀수 = mainline. 패치·digest 갱신만 자동으로 받고
+      # minor 이상(예: 1.30 → 1.31 mainline)은 사람이 stable 여부를 보고 올린다.
+      - dependency-name: "*nginx-unprivileged"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
