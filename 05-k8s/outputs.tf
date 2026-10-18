@@ -67,7 +67,7 @@ output "s3_verify_pod_to_pod" {
 }
 
 output "s3_verify_placement" {
-  description = "교차 노드 배치 확인 — nginx 와 netpol-client 가 서로 다른 NODE 여야 교차 노드 실증"
+  description = "배치 확인 — 노드 2대에서 nginx 가 흩어지면(파트 3) client 는 nginx 1개와 같은 노드: 동일·교차 노드 모두 차단돼야 정상"
   value       = "kubectl get pods -A -o wide -l 'app in (nginx,netpol-client)'"
 }
 
@@ -193,4 +193,34 @@ output "hardening_psa_reject" {
     'violates PodSecurity "restricted:v1.35"' 로 Forbidden 이 정상
   EOT
   value       = "kubectl -n app run psa-probe --image=public.ecr.aws/docker/library/busybox:stable --restart=Never --dry-run=server -- sleep 1"
+}
+
+
+# ============================================================
+# 3단계 파트 3 검증 — 가용성 (분산 · PDB)
+# ============================================================
+
+output "availability_spread" {
+  description = <<-EOT
+    분산 확인 — 노드별 AZ 와, nginx 파드가 올라간 노드.
+    노드 1대: 두 파드가 같은 노드 (soft 분산이라 스케줄을 막지 않음 = 정상)
+    노드 2대(서로 다른 AZ): 다음 롤아웃 뒤 파드가 AZ 마다 1개씩
+  EOT
+  value       = "kubectl get nodes -L topology.kubernetes.io/zone ; kubectl -n app get pods -l app=nginx -o wide"
+}
+
+output "availability_pdb" {
+  description = "PDB 상태 — nginx 파드 2개가 Ready 일 때 MIN AVAILABLE 1 · ALLOWED DISRUPTIONS 1"
+  value       = "kubectl -n app get pdb nginx"
+}
+
+output "availability_pdb_drill" {
+  description = <<-EOT
+    PDB 실증 (노드 1대 기준) — nginx 파드만 골라 그 노드를 드레인해 본다.
+    첫 파드는 evicted, 두 번째는 'Cannot evict pod as it would violate the pod's disruption budget'
+    으로 막히다가 timeout 으로 끝나는 것이 정상 (마지막 1개가 끝까지 서비스).
+    노드 2대면 1개만 퇴거되고 'drained' 로 끝난다 (파드는 다른 노드로 옮겨 감) — 이것도 정상.
+    ⚠ 마지막의 uncordon 까지 반드시 실행 — 안 하면 노드가 스케줄 불가 상태로 남는다.
+  EOT
+  value       = "$n = kubectl -n app get pods -l app=nginx -o jsonpath='{.items[0].spec.nodeName}' ; kubectl drain $n --pod-selector=app=nginx --delete-emptydir-data --timeout=40s ; kubectl uncordon $n"
 }
