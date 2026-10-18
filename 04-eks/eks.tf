@@ -24,8 +24,12 @@ data "aws_cloudwatch_log_group" "eks_control_plane" {
 }
 
 module "eks" {
-  source  = "terraform-aws-modules/eks/aws"
-  version = "~> 21.0"
+  # [3단계 파트 4] 레지스트리 태그(~> 21.0) 대신 커밋 SHA 로 고정 (Checkov CKV_TF_1)
+  #   레지스트리 모듈도 실제로는 이 GitHub 저장소의 태그를 내려받는다 — 태그는 옮겨질 수 있다.
+  #   액션을 SHA 로 고정한 이유(2026.3 trivy-action 태그 오염, build-deploy.yml P1-5)와 같은 원칙.
+  #   고정 버전: v21.25.0 (로컬에서 쓰던 검증된 버전 — 아래 SHA 가 그 태그의 커밋)
+  #   갱신: 새 버전 태그의 커밋 SHA 와 위 버전 표기를 함께 바꾸고 terraform init → plan 으로 차이 확인
+  source = "git::https://github.com/terraform-aws-modules/terraform-aws-eks.git?ref=48a429f63cf96361ea2f4b42677d0cc8a9a656e0"
 
   name               = var.cluster_name
   kubernetes_version = var.kubernetes_version
@@ -164,7 +168,7 @@ module "eks" {
       # 모듈이 만드는 노드 SG 에 "추가"됨(교체 아님) — 커스텀 LT 의
       # network_interfaces.security_groups 에 concat 되는 구조.
       # 이유: ALB SG egress 가 APP SG 를 향하도록 01 에 설계돼 있어(EC2 전제),
-      #   노드가 APP SG 를 함께 달아야 ALB→파드 :80 경로가 열림.
+      #   노드가 APP SG 를 함께 달아야 ALB→파드 경로가 열림 (3단계 파트 2 이후 :8080 — 01 alb_to_eks_pods).
       #   미부착 시 증상: 타깃 등록은 되는데 헬스체크 Target.Timeout.
       # ⚠ plan 에서 network_interfaces.security_groups 가 2개인지 확인할 것.
       #   1개(APP SG만)면 중단 — 노드↔컨트롤플레인 통신이 끊김.

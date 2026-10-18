@@ -41,6 +41,7 @@ on:
       - "images/**"
       - ".github/workflows/build-deploy.yml"
   workflow_dispatch:
+    # checkov:skip=CKV_GHA_7: variant 는 good/vuln 선택지뿐(choice). vuln 은 Trivy 게이트 차단 실증용으로 푸시 전에 막히고, 배포 job 은 good 일 때만 실행된다 (deploy 의 if 조건)
     inputs:
       variant:
         description: "빌드할 이미지 (vuln 은 게이트 차단 실증용 — 푸시되지 않아야 정상)"
