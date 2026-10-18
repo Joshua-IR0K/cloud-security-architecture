@@ -10,19 +10,26 @@
 #          TargetGroupBinding · Helm release · CRD · kube-system · cluster-scope · exec
 #
 # ★ Role(네임스페이스 범위)만 쓰고 ClusterRole 을 만들지 않는다.
-#   → default 네임스페이스 밖으로는 어떤 권한도 새지 않는다.
+#   → app 네임스페이스 밖으로는 어떤 권한도 새지 않는다.
+#
+# [3단계 파트 2] default → app 네임스페이스로 이동
+#   CI 가 닿을 수 있는 곳 = nginx 하나가 사는 app 네임스페이스뿐이다.
+#   default 의 실증 데모(netpol-client·identity-*·secrets-*)는 이제 같은 네임스페이스에도
+#   없으므로, resource_names 핀포인트와 네임스페이스 경계가 이중으로 막는다.
+#   patch 로 파드 스펙을 위험하게 바꾸면(특권·hostNetwork·hostPath 등) Deployment 수정은
+#   받아들여져도 app 의 PSA restricted 가 파드 생성을 거부한다 (G6).
 # ============================================================
 
 resource "kubernetes_role_v1" "ci_deployer" {
   metadata {
     name      = "ci-deployer"
-    namespace = "default"
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
     labels    = { "app.kubernetes.io/managed-by" = "terraform" }
   }
 
   # ── 이미지 롤아웃 대상: nginx Deployment 하나로 핀포인트 ──
-  # resource_names 로 특정 객체만 지정 — 같은 네임스페이스의 다른 Deployment
-  # (netpol-client, identity-*, secrets-*)는 건드릴 수 없다.
+  # resource_names 로 특정 객체만 지정 — 같은 네임스페이스에 다른 Deployment 가 생겨도
+  # 건드릴 수 없다.
   rule {
     api_groups     = ["apps"]
     resources      = ["deployments"]
@@ -60,7 +67,7 @@ resource "kubernetes_role_v1" "ci_deployer" {
 resource "kubernetes_role_binding_v1" "ci_deployer" {
   metadata {
     name      = "ci-deployer"
-    namespace = "default"
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
   }
 
   role_ref {

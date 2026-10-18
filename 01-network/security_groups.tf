@@ -63,6 +63,22 @@ resource "aws_security_group_rule" "alb_to_app" {
   description              = "To App instances on app port"
 }
 
+# ALB Outbound: EKS 파드 포트 (3단계 파트 2 — nginx-unprivileged 8080)
+#   ALB egress 는 APP SG 를 향하도록 설계돼 있다(D19). EKS 노드는 APP SG 를 함께 달고 있어
+#   (04 eks.tf vpc_security_group_ids), 파드 IP(노드 ENI 의 보조 IP)로 가는 트래픽도 이 규칙으로 나간다.
+#   ⚠ 이 규칙이 없으면 타깃 등록은 되는데 헬스체크가 Target.Timeout — D19 와 같은 함정.
+#   80(EC2 경로)과 따로 둔다 — 포트 범위(80-8080)로 묶으면 그 사이 전부가 열린다.
+#   인바운드 쪽은 LB Controller 가 TGB networking.ingress 로 노드 SG 에 같은 포트를 연다(05).
+resource "aws_security_group_rule" "alb_to_eks_pods" {
+  type                     = "egress"
+  from_port                = var.eks_pod_port
+  to_port                  = var.eks_pod_port
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.app.id
+  security_group_id        = aws_security_group.alb.id
+  description              = "To EKS pods (nginx-unprivileged) on pod port"
+}
+
 # ALB Outbound: HTTPS → 인터넷 (Okta Token Endpoint 통신에 필요)
 # ALB가 OIDC 인증 시 Okta에 직접 HTTPS 요청을 보내야 함
 resource "aws_security_group_rule" "alb_https_out" {

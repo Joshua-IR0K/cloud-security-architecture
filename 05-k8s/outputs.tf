@@ -52,8 +52,8 @@ output "s2_cni_addon_check" {
 }
 
 output "s3_netpol_status" {
-  description = "정책 목록 — 게이트 ON 이면 4개(deny/dns/alb/identity), OFF 면 0개"
-  value       = "kubectl get networkpolicy -n default"
+  description = "정책 목록 — 게이트 ON 이면 default 3개(deny/dns/identity) + app 2개(deny/alb), OFF 면 0개"
+  value       = "kubectl get networkpolicy -A"
 }
 
 output "s3_verify_pod_to_pod" {
@@ -63,12 +63,12 @@ output "s3_verify_pod_to_pod" {
     ※ DNS 는 허용 정책이 있으므로 이름 해석은 계속 성공 —
       실패 원인이 DNS 가 아니라 L3/L4 정책임이 분리 증명됨
   EOT
-  value       = "kubectl exec deploy/netpol-client -- wget -qO- --timeout=5 http://nginx"
+  value       = "kubectl exec deploy/netpol-client -- wget -qO- --timeout=5 http://nginx.app"
 }
 
 output "s3_verify_placement" {
   description = "교차 노드 배치 확인 — nginx 와 netpol-client 가 서로 다른 NODE 여야 교차 노드 실증"
-  value       = "kubectl get pods -o wide -l 'app in (nginx,netpol-client)'"
+  value       = "kubectl get pods -A -o wide -l 'app in (nginx,netpol-client)'"
 }
 
 output "s3_verify_imds_blocked" {
@@ -166,4 +166,31 @@ output "s4_verify_rotation" {
       대기 후: (아래 명령의 출력 변화 확인)
   EOT
   value       = "kubectl exec deploy/secrets-granted -- sha256sum /mnt/secrets-store/db-password"
+}
+
+
+# ============================================================
+# 3단계 파트 2 검증 — app 네임스페이스 PSA · 파드 보안
+# ============================================================
+
+output "hardening_psa_labels" {
+  description = "app 네임스페이스 PSA 라벨 — enforce·audit·warn 모두 restricted, 각 -version 은 v1.35"
+  value       = "kubectl get ns app --show-labels"
+}
+
+output "hardening_runtime" {
+  description = <<-EOT
+    실행 신원 · 읽기 전용 루트 — 앞 명령은 uid=101(nginx), 뒤 명령은
+    'Read-only file system' 오류와 'command terminated with exit code 1' 이 정상
+  EOT
+  value       = "kubectl -n app exec deploy/nginx -- id ; kubectl -n app exec deploy/nginx -- touch /etc/nginx/probe"
+}
+
+output "hardening_psa_reject" {
+  description = <<-EOT
+    PSA 거부 실증 (서버 측 dry-run — 아무것도 만들지 않는다).
+    securityContext 없는 평범한 파드도 app 에서는 거부된다:
+    'violates PodSecurity "restricted:v1.35"' 로 Forbidden 이 정상
+  EOT
+  value       = "kubectl -n app run psa-probe --image=public.ecr.aws/docker/library/busybox:stable --restart=Never --dry-run=server -- sleep 1"
 }

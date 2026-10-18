@@ -12,7 +12,21 @@
 #               (replica·probe·볼륨·SA·securityContext·Service·TGB)
 #   CI        : 컨테이너 image 필드 **하나만** 위임받음(ignore_changes)
 #   → 워크로드 전체가 파이프라인으로 넘어가는 것이 아니다.
+#
+# [3단계 파트 2] 파드 보안 하드닝 (위협모델 G4·G6)
+#   · app 네임스페이스로 이동 — PSA restricted 가 강제되는 곳 (namespace.tf)
+#   · 비루트(UID 101) · 권한 상승 금지 · capabilities 전부 제거 · seccomp RuntimeDefault
+#   · 루트 파일시스템 읽기 전용 — nginx 가 쓰는 곳(/tmp: pid·임시 파일)만 emptyDir 로 연다
+#   · SA 토큰 미마운트 — nginx 는 쿠버네티스 API 를 부를 일이 없다
+#   · 포트 8080 — 파트 1 의 nginx-unprivileged 는 1024 미만 포트를 쓰지 않는다
+#   이 조합은 PSA restricted 요구사항과 1:1 이다 — 하나라도 빠지면 app 에서 파드가 거부된다.
 # ============================================================
+
+locals {
+  # 생성 시점 기준 이미지 (D43) — tag 는 사람이 읽는 이름, digest 가 실제 내용
+  app_image = "${local.ecr_repository_url}:${var.app_image_tag}@${var.app_image_digest}"
+  app_uid   = "101" # nginx-unprivileged 의 nginx 사용자 (images/s5-good/Dockerfile USER 101)
+}
 
 # ⚠ nginx_index ConfigMap 제거 (P1-6)
 #   ConfigMap 이 /usr/share/nginx/html 을 마운트하면 이미지가 가진 콘텐츠를
@@ -26,7 +40,7 @@
 resource "kubernetes_deployment_v1" "nginx" {
   metadata {
     name      = "nginx"
-    namespace = "default"
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
     labels = {
       app = "nginx"
     }
@@ -49,24 +63,43 @@ resource "kubernetes_deployment_v1" "nginx" {
       }
 
       spec {
+        # SA 토큰 미마운트 — nginx 는 쿠버네티스 API 를 부르지 않는다 (탈취돼도 쓸 토큰이 없다)
+        automount_service_account_token = false
+
+        # 파드 수준 — PSA restricted 요구사항 (비루트 · seccomp)
+        security_context {
+          run_as_non_root = true
+          run_as_user     = local.app_uid
+          run_as_group    = local.app_uid
+          seccomp_profile {
+            type = "RuntimeDefault"
+          }
+        }
+
         container {
           name = "nginx"
-          # 가변 태그 사용은 Stage 1 한정 (공식 이미지, 존재 보장 목적)
-          # → Stage 5(ECR)부터 자체 빌드 이미지, Stage 7 에서
-          #   digest 고정 + cosign 서명 검증으로 대체 (로드맵 확정)
-          # ECR Public 미러 사용 이유: Docker Hub 익명 pull 은 IP 당
-          # rate limit — 모든 pull 이 단일 NAT IP 로 나가는 이 구조에서
-          # destroy/apply 사이클 반복 시 ImagePullBackOff 로 발현될 수
-          # 있는 노출면. ECR Public 은 AWS 발신 트래픽에 관대함.
-          # Stage 5: 공용 레지스트리 → 우리 ECR
-          #   노드롤에 AmazonEC2ContainerRegistryReadOnly 가 이미 있어
-          #   추가 IAM 작업 없이 pull 가능 (S2 detach 때 보존된 권한).
-          #   ⚠ 리포지토리가 IMMUTABLE — 재빌드 시 새 태그 + var 갱신 필요.
-          #   S7 에서 digest 핀 + cosign 서명 검증으로 대체.
-          image = "${local.ecr_repository_url}:${var.app_image_tag}"
+          # 이미지 이력: Stage 1 공용 이미지(가변 태그) → Stage 5 우리 ECR(IMMUTABLE 태그)
+          #   → 3단계 tag@digest (서명 검증은 S7). 노드롤의 AmazonEC2ContainerRegistryReadOnly 로
+          #   pull 한다 (추가 IAM 없음 — S2 detach 때 보존된 권한).
+          # 생성 시점 기준 이미지(D43) — 이후 이미지는 CI 가 롤아웃한다(D42, 아래 lifecycle).
+          #   ⚠ 파트 1 의 비루트 이미지여야 한다 — 이전 이미지(root 실행)는 아래 securityContext 와
+          #     PSA restricted 에 거부되어 파드가 뜨지 않는다.
+          image = local.app_image
 
           port {
-            container_port = 80
+            name           = "http"
+            container_port = 8080 # nginx-unprivileged — 1024 미만 포트 바인딩 권한이 필요 없다
+          }
+
+          # 컨테이너 수준 — PSA restricted 요구사항 + 읽기 전용 루트
+          security_context {
+            allow_privilege_escalation = false
+            privileged                 = false
+            read_only_root_filesystem  = true
+            run_as_non_root            = true
+            capabilities {
+              drop = ["ALL"]
+            }
           }
 
           resources {
@@ -83,14 +116,25 @@ resource "kubernetes_deployment_v1" "nginx" {
           readiness_probe {
             http_get {
               path = "/"
-              port = 80
+              port = "http"
             }
             initial_delay_seconds = 3
             period_seconds        = 5
           }
 
+          # 읽기 전용 루트에서 nginx 가 쓰는 유일한 곳 (pid · 임시 파일 — 파트 1 베이스가 /tmp 로 옮겨 둠)
+          volume_mount {
+            name       = "tmp"
+            mount_path = "/tmp"
+          }
         }
 
+        volume {
+          name = "tmp"
+          empty_dir {
+            size_limit = "16Mi"
+          }
+        }
       }
     }
   }
@@ -130,7 +174,7 @@ resource "kubernetes_deployment_v1" "nginx" {
 resource "kubernetes_service_v1" "nginx" {
   metadata {
     name      = "nginx"
-    namespace = "default"
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
   }
 
   spec {
@@ -139,8 +183,8 @@ resource "kubernetes_service_v1" "nginx" {
     }
 
     port {
-      port        = 80
-      target_port = 80
+      port        = 80     # 서비스 포트는 그대로 — 클러스터 안에서는 http://nginx.app 으로 부른다
+      target_port = "http" # 컨테이너의 이름 붙은 포트(8080)를 가리킨다
       protocol    = "TCP"
     }
 
@@ -152,14 +196,16 @@ resource "kubernetes_service_v1" "nginx" {
 # 03-workload 의 EKS 타깃그룹(weight 0 으로 리스너에 이미 연결됨)에
 # nginx Service 의 파드 IP 들을 바인딩
 # networking.ingress: LB Controller 가 노드/파드 SG 에
-#   "ALB SG 발신 → TCP/80" 인그레스 규칙을 자동 생성 (최소 개방)
+#   "ALB SG 발신 → TCP/8080" 인그레스 규칙을 자동 생성 (최소 개방)
+#   [3단계 파트 2] 포트는 서비스 포트(80)가 아니라 파드가 실제로 듣는 포트(8080)다.
+#   ALB 쪽 egress 는 01 의 alb_to_eks_pods 규칙이 연다.
 resource "kubectl_manifest" "nginx_tgb" {
   yaml_body = <<-YAML
     apiVersion: elbv2.k8s.aws/v1beta1
     kind: TargetGroupBinding
     metadata:
       name: nginx-tgb
-      namespace: default
+      namespace: ${kubernetes_namespace_v1.app.metadata[0].name}
     spec:
       serviceRef:
         name: nginx
@@ -173,7 +219,7 @@ resource "kubectl_manifest" "nginx_tgb" {
                   groupID: ${local.alb_sg_id}
             ports:
               - protocol: TCP
-                port: 80
+                port: 8080
   YAML
 
   # CRD(helm 설치) + Service 존재 후 적용 — B-1 사슬의 마지막 고리

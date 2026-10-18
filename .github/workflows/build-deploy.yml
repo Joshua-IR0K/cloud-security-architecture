@@ -61,7 +61,8 @@ jobs:
   # ══════════════════════════════════════════════════════════
   build:
     name: Build, Scan, Push
-    runs-on: ubuntu-latest
+    # ubuntu-latest 는 2026-10-19 부터 Ubuntu 26 으로 바뀐다 — 실행 환경이 조용히 바뀌지 않게 버전을 고정한다
+    runs-on: ubuntu-24.04
 
     outputs:
       image_tag: ${{ steps.tag.outputs.value }}
@@ -206,7 +207,8 @@ jobs:
             --query "imageDetails[0].imageDigest" --output text)
           {
             echo "value=${DIGEST}"
-            echo "uri=${{ steps.repo.outputs.url }}:${{ steps.tag.outputs.value }}"
+            # [3단계 파트 2] 롤아웃도 tag@digest — 05 의 기준 이미지와 같은 형식
+            echo "uri=${{ steps.repo.outputs.url }}:${{ steps.tag.outputs.value }}@${DIGEST}"
           } >> "$GITHUB_OUTPUT"
 
       # SBOM 은 "레지스트리에 실제로 올라간 것"을 대상으로 생성한다.
@@ -293,12 +295,13 @@ jobs:
 
           echo "whoami: $(aws sts get-caller-identity --query Arn --output text)"
           echo "--- positive ---"
-          check yes patch deployment/nginx -n default
+          check yes patch deployment/nginx -n app
           echo "--- negative ---"
-          check no  get secrets -n default
+          check no  get secrets -n app
           check no  get secrets -n kube-system
-          check no  delete networkpolicies -n default
-          check no  create pods/exec -n default
+          check no  delete networkpolicies -n app
+          check no  create pods/exec -n app
+          # default 의 실증 데모는 CI 권한 밖 (3단계 파트 2 — CI Role 은 app 에만 있다)
           check no  patch deployment/netpol-client -n default
 
           if [ "$failures" -ne 0 ]; then
@@ -310,7 +313,7 @@ jobs:
       - name: Capture current image
         id: before
         run: |
-          CURRENT=$(kubectl get deployment nginx -n default \
+          CURRENT=$(kubectl get deployment nginx -n app \
             -o jsonpath='{.spec.template.spec.containers[0].image}')
           echo "image=${CURRENT}" >> "$GITHUB_OUTPUT"
           echo "배포 전: ${CURRENT}"
@@ -322,15 +325,15 @@ jobs:
       - name: Roll out image
         run: |
           kubectl set image deployment/nginx \
-            nginx="${{ needs.build.outputs.image_uri }}" -n default
+            nginx="${{ needs.build.outputs.image_uri }}" -n app
 
       - name: Wait for rollout
-        run: kubectl rollout status deployment/nginx -n default --timeout=180s
+        run: kubectl rollout status deployment/nginx -n app --timeout=180s
 
       # 실제로 의도한 이미지가 도는지 확인 (기록된 것과 실행된 것의 일치)
       - name: Verify deployed image
         run: |
-          DEPLOYED=$(kubectl get deployment nginx -n default \
+          DEPLOYED=$(kubectl get deployment nginx -n app \
             -o jsonpath='{.spec.template.spec.containers[0].image}')
           echo "배포 후: ${DEPLOYED}"
           [ "${DEPLOYED}" = "${{ needs.build.outputs.image_uri }}" ] || {
