@@ -19,6 +19,7 @@ data "aws_ssm_parameter" "github_build_role_arn" {
 }
 
 data "aws_iam_policy_document" "ecr_push" {
+  #checkov:skip=CKV_AWS_107:④ ecr-public 인증 토큰 — 이 역할에 ECR Public 쓰기 권한이 없어 토큰으로 가능한 일은 공개 이미지 pull 뿐 (토큰 권한 범위 = 발급 주체 권한). Checkov 는 사설 ECR 의 같은 성격 액션 ecr:GetAuthorizationToken 은 이미 예외로 둔다
   # ① 인증 토큰 — 리소스 수준 제한 미지원(AWS API 제약)
   #    GetAuthorizationToken 은 계정 단위로만 부여 가능하다.
   #    이 권한만으로는 어떤 리포지토리에도 쓸 수 없다(아래 ②가 실제 게이트).
@@ -65,6 +66,21 @@ data "aws_iam_policy_document" "ecr_push" {
     resources = [aws_ssm_parameter.ecr_repository_url.arn]
   }
 
+  # ④ ECR Public 인증 토큰 — 베이스 이미지(public.ecr.aws)를 "인증된 pull" 로 받는다
+  #    (3단계 파트 2 보완, 2026-10-18)
+  #    익명 pull 의 무료 데이터 한도(월 500GB)는 계정에 묶이지 않는다. GitHub 호스티드 러너는
+  #    IP 를 다른 사용자와 공유하므로, 남이 한도를 쓰면 우리 빌드가 베이스 pull 에서
+  #    "toomanyrequests: Data limit exceeded" 로 막힌다 (#84 머지 빌드에서 실제 발생).
+  #    로그인하면 우리 계정 기준 한도가 적용돼 공유 IP 의 영향이 사라진다.
+  #    두 액션 모두 리소스 수준 권한이 없어 Resource 는 "*" 만 가능하다 (① 과 같은 AWS API 제약).
+  #    토큰 발급뿐 — ECR Public 에 쓰는 권한은 없다 (아래 "의도적 부재").
+  statement {
+    sid       = "EcrPublicAuthTokenForBasePull"
+    effect    = "Allow"
+    actions   = ["ecr-public:GetAuthorizationToken", "sts:GetServiceBearerToken"]
+    resources = ["*"]
+  }
+
   # ⚠ KMS 권한을 두지 않는다 (판정 번복 기록):
   #   초안은 "ecr:PutImage(데이터) + kms:GenerateDataKey(키)의 이중 관문"이라는
   #   S4(Secrets Manager) 모델을 그대로 이식했으나 **ECR 은 다르다.**
@@ -85,6 +101,8 @@ data "aws_iam_policy_document" "ecr_push" {
   #   ecr:BatchDeleteImage
   #     → IMMUTABLE 정책을 CI 가 우회할 수 없게 한다.
   #       (삭제로 태그를 비운 뒤 재푸시하면 사실상 덮어쓰기가 되기 때문)
+  #   ecr-public:* 쓰기 (PutImage 등)
+  #     → 우리는 ECR Public 에 이미지를 올리지 않는다. ④ 는 pull 용 인증 토큰뿐이다.
 }
 
 resource "aws_iam_policy" "ecr_push" {
