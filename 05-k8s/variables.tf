@@ -83,23 +83,38 @@ variable "app_image_tag" {
 
     사이클 동작 (destroy/apply 반복 환경에서 중요):
       apply        → 이 baseline 이미지로 기동
-      CI 배포      → s6-<sha> 로 롤포워드 (Terraform 은 이를 되돌리지 않음)
+      CI 배포      → s6-<sha>@<digest> 로 롤포워드 (Terraform 은 이를 되돌리지 않음)
       destroy/apply → 다시 baseline 으로 시작
       = 재구축은 "알려진 기준선"에서 출발하고 CI 가 앞으로 굴린다 (채택 원칙 가)
       = 최신 이미지를 재구축 직후 원하면 CI 를 재실행한다 (검증 세션 한정 절차 나)
 
-    baseline 갱신 시점: 검증된 이미지를 새 기준선으로 승격할 때만 이 값을 올린다.
-    ⚠ 리포지토리가 IMMUTABLE 이라 같은 태그 재푸시는 불가 — 새 태그를 쓴다.
-    S7 에서는 태그 대신 digest(repo@sha256:...) 로 발전시킨다.
+    [3단계 파트 2] baseline 을 tag + digest 로 고정한다 (아래 app_image_digest).
+      baseline = 파트 1 머지 커밋(acde70e)에서 CI 가 빌드·스캔·푸시한 비루트 이미지 (UID 101 · 8080).
+      ⚠ 이전 baseline(baseline-v1 = root 로 실행되는 이미지)으로 되돌리면 app 네임스페이스의
+        PSA restricted 와 securityContext(runAsNonRoot)에 거부되어 파드가 뜨지 않는다.
+      digest 가 실제 고정점이므로 baseline-vN 재태깅은 더 하지 않는다 — CI 가 붙인
+      s6-<커밋> 태그를 그대로 쓰면 어느 커밋의 산출물인지 이름만으로 추적된다.
+
+    baseline 갱신 시점: 검증된 이미지를 새 기준선으로 승격할 때만 tag·digest 를 함께 올린다.
+    ⚠ 리포지토리가 IMMUTABLE 이라 같은 태그 재푸시는 불가.
+      digest 고정은 여기(3단계)서 하고, 서명 검증(cosign)은 S7 에서 더한다.
 
     ⚠ 현재 ECR lifecycle 은 **untagged image만 1일 후 자동 정리**한다.
-      s5-*/s6-*/baseline-* 등 tagged artifact는 자동 만료하지 않는다.
+      s5-*/s6-*/baseline-* 등 tagged artifact는 자동 만료하지 않는다 (baseline 이 사라지지 않는 근거).
       개인 포트폴리오 규모에서는 복잡한 tagged retention보다 재현성·증거 보존을
       우선하고, 필요 시 스테이지 종료 후 수동 정리한다.
-      검증된 이미지를 기준선으로 승격할 때는 재빌드하지 않고 동일 digest에
-      새 versioned tag(`baseline-vN`)를 부여한다. IMMUTABLE이므로 기존 baseline
-      tag를 다른 digest로 덮어쓰지 않는다.
   EOT
   type        = string
-  default     = "baseline-v1"
+  default     = "s6-acde70ed6ca5bef7c879ceeb57162a6162bcaade"
+}
+
+variable "app_image_digest" {
+  description = "기준 이미지의 digest — app_image_tag 와 짝. 태그는 이름, digest 가 실제 내용이다 (ECR IMMUTABLE 위에 한 겹 더)"
+  type        = string
+  default     = "sha256:7eff1cbda7393d518350701ad971d8f561c5a236790854ee0d7c5de9c5ee82ea"
+
+  validation {
+    condition     = can(regex("^sha256:[0-9a-f]{64}$", var.app_image_digest))
+    error_message = "app_image_digest 는 sha256:<64자리 hex> 형식이어야 한다."
+  }
 }

@@ -56,6 +56,12 @@ variable "app_port" {
   default     = 80
 }
 
+variable "eks_pod_port" {
+  description = "EKS 파드 컨테이너 포트 (nginx-unprivileged, 3단계 파트 2) — 05-k8s workload.tf 의 container_port 와 같아야 한다"
+  type        = number
+  default     = 8080
+}
+
 
 variable "domain_name" {
   description = "프로젝트 도메인 (ACM 인증서 + Hosted Zone 조회용)"

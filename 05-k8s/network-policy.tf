@@ -1,5 +1,5 @@
 # ============================================================
-# 04-eks/network-policy.tf — Pod 마이크로세그멘테이션 (Stage 3)
+# 05-k8s/network-policy.tf — Pod 마이크로세그멘테이션 (Stage 3)
 # ============================================================
 # 엔진 결정(O2 해소 → D22): **VPC CNI native NetworkPolicy**
 #   - 서드파티 CNI/컨트롤러 0개 추가 = "최소 표면" thesis 와 일관
@@ -17,6 +17,13 @@
 # ⚠ 전제: NetworkPolicy 는 **ownerReferences 가 있는 파드**에만 적용됨.
 #   standalone bare Pod 은 정책 대상이 되지 않아 identity-test-workload.tf 의
 #   데모 파드를 Deployment 로 전환함 (동시에 트러블슈팅 #7 개선도 달성).
+#
+# [3단계 파트 2] 네임스페이스별 정책 세트
+#   NetworkPolicy 는 네임스페이스 범위다 — nginx 가 app 으로 옮겨 가면서 정책도 나뉜다.
+#     default (실증 데모)   : DNS 허용 · identity 데모 egress · default-deny
+#     app     (운영 워크로드): ALB → nginx:8080 허용 · default-deny (egress 는 전부 차단)
+#   app 에는 DNS 허용도 두지 않는다 — 정적 웹서버는 이름 해석도 외부 호출도 필요 없다.
+#   east-west 실증(S3)은 이제 네임스페이스를 넘는다: default 의 client → app 의 nginx = 차단.
 # ============================================================
 
 # ── 데모 클라이언트 (게이트와 무관하게 상시 존재) ─────────
@@ -46,6 +53,8 @@ resource "kubernetes_deployment_v1" "netpol_client" {
               weight = 100
               pod_affinity_term {
                 topology_key = "kubernetes.io/hostname"
+                # [3단계 파트 2] nginx 가 app 으로 옮겨 갔다 — 기준 파드를 그 네임스페이스에서 찾는다
+                namespaces = [kubernetes_namespace_v1.app.metadata[0].name]
                 label_selector {
                   match_labels = { app = "nginx" }
                 }
@@ -68,7 +77,7 @@ resource "kubernetes_deployment_v1" "netpol_client" {
 }
 
 # ============================================================
-# 정책 4종 — var.network_policy_enforcement 게이트
+# 정책 5종 (default 3 · app 2) — var.network_policy_enforcement 게이트
 #   false: 생성 안 함 → 클러스터는 기본 전면 허용 (BEFORE 캡처용)
 #   true : 생성 → default-deny + 명시 허용만 (AFTER)
 #   ⚠ 애드온의 enableNetworkPolicy 는 게이트와 무관하게 항상 켬 —
@@ -112,7 +121,7 @@ resource "kubernetes_network_policy_v1" "allow_dns" {
   }
 }
 
-# ── 허용 2: ALB → nginx (north-south 진입 경로 보존) ──────
+# ── 허용 2: ALB → nginx (north-south 진입 경로 보존) — app 네임스페이스 ──
 # ipBlock 을 "퍼블릭 서브넷 CIDR"로 한정하는 이유:
 #   ALB ENI 는 퍼블릭 서브넷에 있고, 파드/노드는 프라이빗 서브넷에 있다.
 #   VPC CIDR 전체로 열면 모든 파드가 nginx 에 접근 가능해져
@@ -120,12 +129,13 @@ resource "kubernetes_network_policy_v1" "allow_dns" {
 #   → 정밀 스코프가 곧 데모 성립 조건.
 # ⚠ kubelet readiness 프로브(노드 IP 발신)는 VPC CNI 가 자동 허용하지만,
 #   만약 nginx 가 NotReady 로 떨어지면 STAGE3_RUNBOOK "폴백" 절 참고.
+# [3단계 파트 2] 포트 80 → 8080: 정책은 서비스 포트가 아니라 파드가 실제로 듣는 포트에 건다.
 resource "kubernetes_network_policy_v1" "allow_alb_to_nginx" {
   count = var.network_policy_enforcement ? 1 : 0
 
   metadata {
     name      = "allow-alb-to-nginx"
-    namespace = "default"
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
   }
 
   spec {
@@ -146,7 +156,7 @@ resource "kubernetes_network_policy_v1" "allow_alb_to_nginx" {
           }
         }
         ports {
-          port     = "80"
+          port     = "8080"
           protocol = "TCP"
         }
       }
@@ -224,8 +234,29 @@ resource "kubernetes_network_policy_v1" "default_deny" {
 
   depends_on = [
     kubernetes_network_policy_v1.allow_dns,
-    kubernetes_network_policy_v1.allow_alb_to_nginx,
     kubernetes_network_policy_v1.allow_identity_demo_egress,
+  ]
+}
+
+# ── app 네임스페이스 default-deny (ingress·egress 모두) ──
+# 같은 원칙: 허용(ALB → nginx)이 먼저 존재한 뒤 마지막에 건다.
+# egress 허용이 하나도 없다 = nginx 는 어디로도 연결을 시작할 수 없다
+#   (응답 트래픽은 NetworkPolicy 가 상태 기반이라 허용된 인바운드에 한해 나간다).
+resource "kubernetes_network_policy_v1" "app_default_deny" {
+  count = var.network_policy_enforcement ? 1 : 0
+
+  metadata {
+    name      = "default-deny-all"
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
+  }
+
+  spec {
+    pod_selector {} # 네임스페이스 내 전체
+    policy_types = ["Ingress", "Egress"]
+  }
+
+  depends_on = [
+    kubernetes_network_policy_v1.allow_alb_to_nginx,
   ]
 }
 
