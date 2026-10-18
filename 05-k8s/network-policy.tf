@@ -47,6 +47,9 @@ resource "kubernetes_deployment_v1" "netpol_client" {
       spec {
         # 교차 노드 실증(노드 2대 시): nginx 와 다른 노드에 배치되도록 유도.
         # preferred(soft) 이므로 노드 1대에서도 스케줄 실패하지 않음.
+        # [3단계 파트 3] nginx 가 노드마다 흩어지면(topologySpread) 피할 노드가 없어 nginx 1개와
+        #   같은 노드에 놓인다. Service 호출은 두 파드 중 하나로 가므로 동일 노드·교차 노드 모두
+        #   차단돼야 정상이다 (정책은 출발 노드와 무관하게 목적지 파드에서 집행된다).
         affinity {
           pod_anti_affinity {
             preferred_during_scheduling_ignored_during_execution {

@@ -9,7 +9,7 @@
 #
 # 소유권 (D42 Delegated Field Ownership) — "이관"이 아니다:
 #   Terraform : 이 Deployment 의 구조·보안 전체를 계속 소유
-#               (replica·probe·볼륨·SA·securityContext·Service·TGB)
+#               (replica·probe·볼륨·SA·securityContext·분산·Service·TGB·PDB)
 #   CI        : 컨테이너 image 필드 **하나만** 위임받음(ignore_changes)
 #   → 워크로드 전체가 파이프라인으로 넘어가는 것이 아니다.
 #
@@ -20,6 +20,12 @@
 #   · SA 토큰 미마운트 — nginx 는 쿠버네티스 API 를 부를 일이 없다
 #   · 포트 8080 — 파트 1 의 nginx-unprivileged 는 1024 미만 포트를 쓰지 않는다
 #   이 조합은 PSA restricted 요구사항과 1:1 이다 — 하나라도 빠지면 app 에서 파드가 거부된다.
+#
+# [3단계 파트 3] 가용성 — "파드가 언제 사라지는가"마다 통제 하나씩
+#   · 배포로 교체될 때          → RollingUpdate maxSurge 1 / maxUnavailable 0 (Ready 2개 유지)
+#   · 노드·AZ 가 사라질 때       → topologySpreadConstraints (AZ·노드 분산, soft)
+#   · 프로세스가 응답을 멈출 때  → livenessProbe 로 재시작 (readiness 보다 느슨하게)
+#   · 드레인·노드 교체(자발적)   → PodDisruptionBudget minAvailable 1
 # ============================================================
 
 locals {
@@ -47,7 +53,18 @@ resource "kubernetes_deployment_v1" "nginx" {
   }
 
   spec {
-    replicas = 2 # 노드 1대 위 2 레플리카 (TG 다중 타깃 확인용)
+    replicas = 2 # TG 다중 타깃 확인 + PDB(minAvailable 1)와 짝 — 한 번에 1개까지만 내려간다
+
+    # [3단계 파트 3] 롤아웃 중에도 Ready 파드 2개 유지 — 새 파드가 Ready 가 된 뒤에 기존 파드를 내린다.
+    #   2 레플리카에서는 기본값(25%)도 결과가 같지만(올림 1 / 내림 0) 의도를 코드에 고정한다
+    #   — 레플리카를 늘려도 "롤아웃 중 가용 감소 0" 이 유지된다. CI 롤아웃(set image)도 이 규칙을 따른다.
+    strategy {
+      type = "RollingUpdate"
+      rolling_update {
+        max_surge       = "1"
+        max_unavailable = "0"
+      }
+    }
 
     selector {
       match_labels = {
@@ -73,6 +90,33 @@ resource "kubernetes_deployment_v1" "nginx" {
           run_as_group    = local.app_uid
           seccomp_profile {
             type = "RuntimeDefault"
+          }
+        }
+
+        # [3단계 파트 3] AZ·노드 분산 — soft(ScheduleAnyway)
+        #   노드가 1대면 두 파드가 같은 노드에 뜨고(스케줄을 막지 않음), 2대 이상이면 흩어 놓는다.
+        #   hard(DoNotSchedule)로 하면 노드 1대·AZ 1개일 때 두 번째 파드가 Pending 이 된다.
+        #   zone = AZ 장애 대비, hostname = 노드 장애·교체 대비 (같은 AZ 에 노드가 여럿일 때).
+        #   match_label_keys = pod-template-hash: 롤아웃 중 옛 파드와 새 파드를 섞어 세지 않고
+        #   새 리비전끼리만 균형을 맞춘다 (섞어 세면 롤아웃이 끝난 뒤 한쪽으로 몰릴 수 있다).
+        #   ⚠ 스케줄 시점에만 적용 — 이미 떠 있는 파드를 옮기지 않는다. 노드를 늘린 뒤에는 다음 롤아웃 때 흩어진다.
+        topology_spread_constraint {
+          max_skew           = 1
+          topology_key       = "topology.kubernetes.io/zone"
+          when_unsatisfiable = "ScheduleAnyway"
+          match_label_keys   = ["pod-template-hash"]
+          label_selector {
+            match_labels = { app = "nginx" }
+          }
+        }
+
+        topology_spread_constraint {
+          max_skew           = 1
+          topology_key       = "kubernetes.io/hostname"
+          when_unsatisfiable = "ScheduleAnyway"
+          match_label_keys   = ["pod-template-hash"]
+          label_selector {
+            match_labels = { app = "nginx" }
           }
         }
 
@@ -113,6 +157,7 @@ resource "kubernetes_deployment_v1" "nginx" {
             }
           }
 
+          # readiness — "지금 트래픽을 받아도 되는가". 실패하면 재시작 없이 Service·ALB 대상에서만 빠진다.
           readiness_probe {
             http_get {
               path = "/"
@@ -120,6 +165,22 @@ resource "kubernetes_deployment_v1" "nginx" {
             }
             initial_delay_seconds = 3
             period_seconds        = 5
+          }
+
+          # [3단계 파트 3] liveness — "살아 있는가". 응답이 멈췄으면 컨테이너를 재시작한다.
+          #   readiness 보다 느슨하게: 10초 주기 × 3회 = 약 30초 연속 실패할 때만 재시작.
+          #   더 공격적이면 순간 부하에도 재시작이 이어져(재시작 폭풍) 오히려 가용성을 떨어뜨린다.
+          #   "/" 는 외부 의존이 없는 정적 페이지라 liveness 로 써도 안전하다
+          #   (DB·외부 API 를 확인하는 liveness 는 의존 대상 장애를 전 파드 재시작으로 키운다 — 금물).
+          liveness_probe {
+            http_get {
+              path = "/"
+              port = "http"
+            }
+            initial_delay_seconds = 10
+            period_seconds        = 10
+            timeout_seconds       = 2
+            failure_threshold     = 3
           }
 
           # 읽기 전용 루트에서 nginx 가 쓰는 유일한 곳 (pid · 임시 파일 — 파트 1 베이스가 /tmp 로 옮겨 둠)
@@ -164,10 +225,38 @@ resource "kubernetes_deployment_v1" "nginx" {
   #   plan 은 ignore 대상에 config 대신 prior state 를 쓴다
   #   → Terraform 이 다른 필드를 고쳐도 CI 의 이미지는 유지된다.
   #   ⚠ 단 "생성" 시점에는 config 가 적용된다 → var.app_image_tag 의 baseline 의미(D43)
+  #   ⚠ kubectl rollout restart 는 쓰지 않는다 — 파드 템플릿에 restartedAt 주석을 넣어 plan 에
+  #     drift 가 생긴다 (위임 범위는 image 하나뿐). 재시작이 필요하면 CI 재실행(set image) 또는
+  #     terraform apply 로 한다. (3단계 파트 3 로컬 검증에서 확인)
   lifecycle {
     ignore_changes = [
       spec[0].template[0].spec[0].container[0].image
     ]
+  }
+}
+
+# ── PodDisruptionBudget (3단계 파트 3) ─────────────────────
+# 드레인·노드 교체 같은 "자발적 중단" 때 nginx 가 한꺼번에 사라지지 않게 한다.
+#   minAvailable 1 + replicas 2 = 한 번에 1개까지만 퇴거(evict) 허용.
+#   노드가 1대일 때 그 노드를 드레인하면: 첫 파드는 퇴거되고, 두 번째는 PDB 가 막는다
+#   (퇴거된 파드가 갈 노드가 없어 Ready 가 1개 → 마지막 1개를 끝까지 지킨다).
+# PDB 가 관여하지 않는 것 (오해 주의):
+#   · CI 롤아웃(set image) — 퇴거가 아니라 Deployment 교체다 (위 strategy 가 담당)
+#   · terraform destroy — Deployment 삭제는 퇴거가 아니다 (05 → 04 순서라 노드그룹 삭제도 막지 않는다)
+#   · 노드 장애·OOM — 비자발적 중단은 PDB 대상이 아니다 (위 topologySpread 가 담당)
+# ⚠ unhealthyPodEvictionPolicy(AlwaysAllow)는 이 프로바이더(kubernetes 3.2.x)의 PDB 리소스가
+#   지원하지 않아 기본값(IfHealthyBudget)이다 — 고장 난 파드가 섞이면 드레인이 막힐 수 있다.
+resource "kubernetes_pod_disruption_budget_v1" "nginx" {
+  metadata {
+    name      = "nginx"
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
+  }
+
+  spec {
+    min_available = "1"
+    selector {
+      match_labels = { app = "nginx" }
+    }
   }
 }
 
