@@ -29,6 +29,7 @@
 # ── 데모 클라이언트 (게이트와 무관하게 상시 존재) ─────────
 # BEFORE 상태(정책 없음)를 캡처하려면 게이트를 켜기 "전"에 이미 떠 있어야 함
 resource "kubernetes_deployment_v1" "netpol_client" {
+  #checkov:skip=CKV_K8S_8,CKV_K8S_9,CKV_K8S_11,CKV_K8S_15,CKV_K8S_21,CKV_K8S_28,CKV_K8S_29,CKV_K8S_30,CKV_K8S_43:S3 실증 픽스처 — busybox sleep 클라이언트(서버 프로세스 없음)·공용 이미지 태그·default 네임스페이스·기본 securityContext 를 의도적으로 유지. 하드닝 기준은 운영 nginx(app)에 적용·검증
   metadata {
     name      = "netpol-client"
     namespace = "default"

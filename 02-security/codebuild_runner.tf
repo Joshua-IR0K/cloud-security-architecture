@@ -93,6 +93,7 @@ resource "aws_iam_role" "codebuild_runner" {
 }
 
 data "aws_iam_policy_document" "codebuild_runner" {
+  #checkov:skip=CKV_AWS_111,CKV_AWS_356:VpcEni 의 ec2:CreateNetworkInterface·DeleteNetworkInterface 는 AWS CodeBuild 문서의 VPC 서비스 역할 권장 정책 그대로(빌드마다 CodeBuild 가 ENI 생성·삭제). 위임 경로 CreateNetworkInterfacePermission 은 서브넷·서비스 조건으로 핀포인트돼 있다
   # 로그
   statement {
     sid    = "Logs"

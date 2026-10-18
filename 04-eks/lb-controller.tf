@@ -68,9 +68,18 @@ data "aws_iam_policy_document" "lb_controller" {
       "ec2:DescribeSubnets",
       "ec2:DescribeVpcs",
       "ec2:DescribeAvailabilityZones",
-      "ec2:GetSecurityGroupsForVpc",
     ]
     resources = ["*"]
+  }
+
+  # 1-b) [3단계 파트 4] GetSecurityGroupsForVpc 는 VPC 단위 리소스 지정을 지원한다 (Checkov CKV_AWS_356)
+  #      → 이 클러스터의 VPC 하나로 핀포인트. 위 Describe 들은 리소스 지정 자체가 불가해 "*" 가 유일한 선택.
+  #      ⚠ 클러스터 세션에서 확인: LBC 로그에 AccessDenied 가 없고 TGB 가 정상 동작해야 한다.
+  statement {
+    sid       = "SecurityGroupsForClusterVpcOnly"
+    effect    = "Allow"
+    actions   = ["ec2:GetSecurityGroupsForVpc"]
+    resources = ["arn:aws:ec2:${var.region}:${data.aws_caller_identity.current.account_id}:vpc/${local.vpc_id}"]
   }
 
   # 2) 타깃 등록/해제 — 03 발행 EKS TG 한 곳으로 핀포인트
@@ -85,7 +94,7 @@ data "aws_iam_policy_document" "lb_controller" {
   }
 
   # 3) TGB networking.ingress — 노드 SG 룰 자동 관리 (게이트 #5 구현부)
-  #    "ALB SG 발신 → TCP/80" 규칙을 컨트롤러가 노드 SG 에 생성/회수
+  #    "ALB SG 발신 → TCP/8080" 규칙을 컨트롤러가 노드 SG 에 생성/회수 (3단계 파트 2 이후 파드 포트)
   statement {
     sid    = "NodeSGRuleManagement"
     effect = "Allow"

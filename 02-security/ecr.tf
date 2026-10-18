@@ -64,6 +64,7 @@ resource "aws_kms_alias" "images" {
 
 # ── ECR 리포지토리 ────────────────────────────────────────
 resource "aws_ecr_repository" "app" {
+  #checkov:skip=CKV_AWS_163:레지스트리 단위 Inspector Enhanced Scanning(scanType=ENHANCED)을 사용 — scan_on_push 는 Basic Scanning 전용 설정이라 의도적으로 두지 않는다 (아래 검증 축 ① 주석)
   name = "${var.project_name}/app"
 
   # ★ 검증 축 ③ — 태그 불변성

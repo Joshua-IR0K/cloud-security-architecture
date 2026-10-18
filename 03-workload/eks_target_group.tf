@@ -18,6 +18,7 @@
 # ============================================================
 
 resource "aws_lb_target_group" "eks" {
+  #checkov:skip=CKV_AWS_378:TG HTTP 사용 — TLS 는 CloudFront·ALB 에서 종료, ALB→파드 구간은 VPC 내부 + SG(D19) + NetworkPolicy(app default-deny)로 격리 (alb.tf 의 EC2 TG 와 같은 사유)
   name        = "${var.project_name}-eks-tg" # devsecops-project-eks-tg = 24자 (한도 32)
   port        = 80
   protocol    = "HTTP"

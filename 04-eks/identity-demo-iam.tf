@@ -28,6 +28,51 @@ resource "aws_s3_bucket_public_access_block" "identity_demo" {
   restrict_public_buckets = true
 }
 
+# ── [3단계 파트 4] 데모 버킷도 기본 보안 설정 (Checkov CKV_AWS_145 · CKV_AWS_21 · CKV2_AWS_61) ──
+# 사이클마다 지워지는 버킷이라 비용·운영 부담이 없어 skip 대신 고친다.
+# 암호화: AWS 관리형 키(aws/s3). 파드는 S3 를 거쳐서만 읽으므로 역할에 KMS 권한을 더할 필요가 없다
+#   (aws/s3 키 정책이 "이 계정 주체 + S3 경유" 사용을 허용) — S2 실증 내용은 그대로다.
+resource "aws_s3_bucket_server_side_encryption_configuration" "identity_demo" {
+  bucket = aws_s3_bucket.identity_demo.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "aws:kms"
+    }
+    bucket_key_enabled = true
+  }
+}
+
+resource "aws_s3_bucket_versioning" "identity_demo" {
+  bucket = aws_s3_bucket.identity_demo.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# 버전이 쌓이지 않게 — 이전 버전·미완료 업로드는 1일 뒤 정리 (force_destroy 와 함께 destroy 도 깨끗하다)
+resource "aws_s3_bucket_lifecycle_configuration" "identity_demo" {
+  bucket = aws_s3_bucket.identity_demo.id
+
+  rule {
+    id     = "expire-noncurrent-and-abort-mpu"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 1
+    }
+  }
+
+  depends_on = [aws_s3_bucket_versioning.identity_demo]
+}
+
 resource "aws_s3_object" "identity_demo_hello" {
   bucket  = aws_s3_bucket.identity_demo.id
   key     = "hello-from-stage2.txt"

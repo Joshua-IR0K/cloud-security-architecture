@@ -28,6 +28,7 @@ ephemeral "random_password" "demo" {
 
 # ── 시크릿 컨테이너 ────────────────────────────────────────
 resource "aws_secretsmanager_secret" "demo" {
+  #checkov:skip=CKV2_AWS_57:S4 데모 시크릿 — 사이클마다 생성·즉시 삭제(recovery_window 0)되어 교체 주기가 의미 없음. 자동 교체는 교체용 Lambda 가 필요해 범위 밖 (운영 시크릿이면 적용)
   name        = "${var.project_name}/demo/app-credentials"
   description = "Stage 4 demo credentials — mounted via Secrets Store CSI (never a K8s Secret)"
 

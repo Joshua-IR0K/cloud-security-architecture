@@ -15,6 +15,10 @@
 #   ASCP 가 파드의 아이덴티티를 받아 IAM 역할을 수임하고,
 #   그 역할로 허용된 시크릿만 가져온다. IRSA 대신 Pod Identity 사용.
 #   요건: EKS 1.24+ (우리는 1.35), 차트 0.3.11+ (Pod Identity 지원 추가 버전)
+#
+# Checkov (3단계 파트 4): 이 파일의 데모 SA·파드는 리소스마다 #checkov:skip 으로 K8s 하드닝 항목을 제외한다.
+#   실증 목적상 의도적으로 최소 구성(sleep 데모 파드·공용 이미지 태그·default 네임스페이스)이며,
+#   하드닝 기준(비루트·읽기 전용 루트·probe·digest 등)은 운영 워크로드 nginx(app 네임스페이스)에 적용·검증한다.
 # ============================================================
 
 # ── 드라이버 + 프로바이더 설치 ────────────────────────────
@@ -83,6 +87,7 @@ resource "time_sleep" "wait_for_crd" {
 
 # ── SA — 04 의 association 이 이 이름을 참조 ──────────────
 resource "kubernetes_service_account_v1" "secrets_demo" {
+  #checkov:skip=CKV_K8S_21:S4 실증 픽스처 — default 네임스페이스는 의도 (운영 워크로드는 app 네임스페이스)
   metadata {
     name      = "s4-secrets-demo"
     namespace = "default"
@@ -125,6 +130,7 @@ resource "kubectl_manifest" "secrets_demo" {
 
 # ── ② BUILD: 자격 있는 파드 (마운트 성공해야 정답) ────────
 resource "kubernetes_deployment_v1" "secrets_granted" {
+  #checkov:skip=CKV_K8S_8,CKV_K8S_9,CKV_K8S_11,CKV_K8S_14,CKV_K8S_21,CKV_K8S_28,CKV_K8S_29,CKV_K8S_30,CKV_K8S_43:S4 실증 픽스처 — aws-cli sleep 파드(서버 프로세스 없음)·공용 이미지 태그·default 네임스페이스·기본 securityContext 를 의도적으로 유지. 하드닝 기준은 운영 nginx(app)에 적용·검증
   metadata {
     name      = "secrets-granted"
     namespace = "default"
@@ -179,6 +185,7 @@ resource "kubernetes_deployment_v1" "secrets_granted" {
 # → 볼륨 마운트 실패 → 파드가 ContainerCreating 에서 진행 못 함
 #   S2/S3 의 BREAK 보다 극적이다: 실패가 파드 기동 자체를 막는다.
 resource "kubernetes_deployment_v1" "secrets_denied" {
+  #checkov:skip=CKV_K8S_8,CKV_K8S_9,CKV_K8S_11,CKV_K8S_14,CKV_K8S_21,CKV_K8S_28,CKV_K8S_29,CKV_K8S_30,CKV_K8S_43:S4 실증 픽스처 — aws-cli sleep 파드(서버 프로세스 없음)·공용 이미지 태그·default 네임스페이스·기본 securityContext 를 의도적으로 유지. 하드닝 기준은 운영 nginx(app)에 적용·검증
   metadata {
     name      = "secrets-denied"
     namespace = "default"

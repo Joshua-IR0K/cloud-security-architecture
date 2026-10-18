@@ -37,6 +37,14 @@ updates:
     labels:
       - "dependencies"
       - "terraform"
+    ignore:
+      # [3단계 파트 4] 프로바이더 메이저 업그레이드(예: aws 5 → 6)는 리소스 문법·state 변경을 동반한다
+      #   → 자동 PR 로 받지 않고 사람이 계획해서 올린다 (01~03 은 aws 5.x, 04·05 는 이미 6.x)
+      - dependency-name: "hashicorp/aws"
+        update-types: ["version-update:semver-major"]
+      # kubernetes 프로바이더는 05 스키마를 검증한 3.2.x 로 유지 — 클러스터 세션 실증 뒤 올린다
+      - dependency-name: "hashicorp/kubernetes"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   # 컨테이너 베이스 이미지 (3단계) — 서비스 이미지만
   #   Dockerfile 의 FROM tag@digest 를 함께 올리는 PR 을 만든다 → 머지 후 CI 의 Trivy 게이트가 검증.
