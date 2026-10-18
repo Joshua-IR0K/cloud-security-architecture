@@ -146,7 +146,7 @@ jobs:
       #   기존 digest 를 재사용해 배포만 다시 수행한다.
       - name: Set up Buildx
         if: steps.exists.outputs.found == 'false'
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
 
       # ── 베이스 이미지 인증 pull (3단계 파트 2 보완, 2026-10-18) ──
       # 베이스(public.ecr.aws)를 익명으로 받으면 무료 데이터 한도가 계정에 묶이지 않는다.
