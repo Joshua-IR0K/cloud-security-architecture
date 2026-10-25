@@ -97,7 +97,7 @@ output "s3_node_scale" {
 # ── ① BREAK: 자격 없는 파드는 기동 자체가 안 됨 ───────────
 output "s4_verify_denied" {
   description = "①실패가 정답 — ContainerCreating 에서 멈춤 (마운트 실패)"
-  value       = "kubectl get pods -l role=denied ; kubectl describe pod -l role=denied | Select-String 'FailedMount|not authorized|Warning'"
+  value       = "kubectl get pods -l role=s4-denied ; kubectl describe pod -l role=s4-denied | Select-String 'FailedMount|not authorized|Warning'"
 }
 
 # ── ② BUILD: 마운트된 파일 확인 ───────────────────────────
