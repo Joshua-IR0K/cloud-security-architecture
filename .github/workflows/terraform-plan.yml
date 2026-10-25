@@ -53,13 +53,13 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-plan-guard
 
-      # 거부 11 = state·시크릿 경로 8 + 감사 기록 내용 2 + 잠금 쓰기 1
+      # 거부 12 = state·시크릿 경로 8 + 감사 기록 내용 3 + 잠금 쓰기 1
       #   state·시크릿: 03·05 state · 03 목록 · Okta 시크릿 · CloudFront 설정 2 · ALB 규칙 · WAF 조회
-      #   감사 기록: EKS 감사 로그 (멘토 ⑤) · Athena 로그 조회 (멘토 ③)
+      #   감사 기록: EKS 감사 로그 읽기 · Logs Insights 쿼리 실행 (멘토 ⑤) · Athena 로그 조회 (멘토 ③)
       # ⚠ S3 거부(03·05 state)는 403 으로 판정한다. ListBucket 이 없으면 객체가 없어도
       #   403 이 오므로, 이 가드는 "객체가 존재할 때" 의미가 있다(destroy 후에도 state
       #   객체는 남는다). 객체 존재와 무관한 증명은 정책 시뮬레이터로 했다 (A1 문서 §7).
-      - name: Verify plan role boundary (allow 3 / deny 11)
+      - name: Verify plan role boundary (allow 3 / deny 12)
         run: |
           set -uo pipefail
 
@@ -137,6 +137,12 @@ jobs:
           # 그 자체라 CI 가 읽으면 안 된다. (그룹이 없어도 권한이 없으면 AccessDenied 가 먼저 온다)
           deny "EKS 감사 로그 내용 읽기" \
             aws logs filter-log-events --log-group-name "/aws/eks/joshua-eks/cluster" --limit 1
+          # 저장 쿼리(02 eks_audit_queries.tf)는 plan 이 "정의"만 조회한다. 쿼리 실행은 같은 감사 로그를
+          # 읽는 또 하나의 경로라 막혀 있어야 한다. (최근 1분·1건 — 권한이 열려 있어도 스캔은 미미하다)
+          deny "EKS 감사 로그 쿼리 실행 (Logs Insights)" \
+            aws logs start-query --log-group-name "/aws/eks/joshua-eks/cluster" \
+              --start-time "$(( $(date +%s) - 60 ))" --end-time "$(date +%s)" \
+              --query-string "fields @timestamp | limit 1"
           # Athena 는 CloudTrail·Flow Logs·WAF 를 한 번에 조회하는 경로다. plan 에는 카탈로그·워크그룹
           # 메타데이터 조회만 필요하다. (SELECT 1 — 권한이 열려 있어도 로그를 스캔하지 않는다)
           deny "Athena 로그 조회 실행" \
@@ -153,7 +159,7 @@ jobs:
             echo "::error::plan 역할의 권한 경계가 설계와 다르다 — plan 을 실행하지 않는다"
             exit 1
           fi
-          echo "== 허용 3 / 거부 11 — 경계 확인 완료 =="
+          echo "== 허용 3 / 거부 12 — 경계 확인 완료 =="
 
   # ── 영속 스택 plan ─────────────────────────────────────────
   plan:

@@ -185,6 +185,16 @@ resource "aws_iam_role_policy" "codebuild_runner" {
 # ── CodeBuild 프로젝트 (러너 모드) ─────────────────────────
 # source = GITHUB + CODECONNECTIONS. WORKFLOW_JOB_QUEUED webhook이 job을 기동한다.
 # buildspec은 러너 모드에서 형식상 존재하며 실제 job 내용은 GitHub Actions가 결정한다.
+locals {
+  gha_runner_buildspec = <<-YAML
+    version: 0.2
+    phases:
+      build:
+        commands:
+          - echo "Replaced by GitHub Actions runner mode"
+  YAML
+}
+
 resource "aws_codebuild_project" "gha_runner" {
   name          = "${var.project_name}-gha-deploy-runner"
   description   = "Ephemeral GitHub Actions runner for EKS deploy jobs (S6-B)"
@@ -218,13 +228,10 @@ resource "aws_codebuild_project" "gha_runner" {
       type     = "CODECONNECTIONS"
       resource = var.github_connection_arn
     }
-    buildspec       = <<-YAML
-      version: 0.2
-      phases:
-        build:
-          commands:
-            - echo "Replaced by GitHub Actions runner mode"
-    YAML
+    # 줄바꿈 정규화 — Windows(CRLF) 작업 트리에서는 heredoc 에 CR 이 남아 AWS·CI(LF) 값과 달라진다
+    #   (2026-10-25 로컬 02 plan 에서 buildspec 전 줄이 -/+ 로 나온 원인). athena.tf 와 같은 처리.
+    #   trimspace 는 쓰지 않는다 — 지금 AWS 에 저장된 값(끝 줄바꿈 포함)과 정확히 같아야 변경이 0 이다.
+    buildspec = replace(local.gha_runner_buildspec, "\r", "")
   }
 
   # ★ VPC 연결 — 이것이 이 리소스의 존재 이유

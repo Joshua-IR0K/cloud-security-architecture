@@ -138,6 +138,7 @@ data "aws_iam_policy_document" "plan_permissions" {
   #   셋 다 03 이 소유한 서비스라 01·02 plan 에는 필요 없다 → 제거.
   #   config:Get*(설정 이력 내용)도 같은 기준으로 제거.
   #   logs: 02 에 EKS 컨트롤플레인 로그 그룹이 생겨 메타데이터 조회만 허용한다.
+  #     + 저장 쿼리 정의 조회(DescribeQueryDefinitions) — 이름·쿼리 문자열뿐이고 로그 내용이 아니다.
   #     로그 내용(GetLogEvents·FilterLogEvents·StartQuery)은 감사 기록 자체라 계속 제외 — 가드가 확인.
   statement {
     sid    = "ReadOnlyForPlan"
@@ -163,6 +164,8 @@ data "aws_iam_policy_document" "plan_permissions" {
       "logs:DescribeLogGroups",
       "logs:ListTagsForResource",
       "logs:ListTagsLogGroup",
+      # 02 의 aws_cloudwatch_query_definition refresh (저장 쿼리 정의 — 실행 권한 StartQuery 는 없음)
+      "logs:DescribeQueryDefinitions",
       "cloudtrail:Describe*",
       "cloudtrail:Get*",
       "cloudtrail:List*",
