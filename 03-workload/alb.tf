@@ -150,10 +150,12 @@ resource "aws_lb_listener_rule" "oidc_auth" {
     }
   }
 
+  # 평소엔 CloudFront 가 보내는 값 하나, 교체 중 병행 구간엔 두 슬롯 모두 받는다 (origin_verify.tf)
+  # 여러 값은 OR 로 평가된다 — 하나라도 일치하면 이 규칙(OIDC → forward)으로 간다
   condition {
     http_header {
       http_header_name = "X-Origin-Verify"
-      values           = [random_password.origin_verify.result]
+      values           = local.origin_verify_accepted
     }
   }
 

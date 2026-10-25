@@ -2,10 +2,7 @@
 # 03-workload/cloudfront.tf — CloudFront + Custom Domain
 # ============================================================
 
-resource "random_password" "origin_verify" {
-  length  = 32
-  special = false
-}
+# X-Origin-Verify 값은 origin_verify.tf 의 2슬롯에서 온다 (무중단 교체 절차 포함)
 
 resource "aws_cloudfront_distribution" "main" {
   #checkov:skip=CKV_AWS_374:지역 제한 미적용 — 글로벌 포트폴리오 접근성 요구 + VPN 우회 가능한 약한 통제로 판단
@@ -38,10 +35,10 @@ resource "aws_cloudfront_distribution" "main" {
       origin_keepalive_timeout = 5
     }
 
-    # ALB 직접 접근 차단용 비밀 헤더
+    # ALB 직접 접근 차단용 비밀 헤더 — 지금 활성인 슬롯 값 (origin_verify.tf)
     custom_header {
       name  = "X-Origin-Verify"
-      value = random_password.origin_verify.result
+      value = local.origin_verify_sent
     }
   }
 
