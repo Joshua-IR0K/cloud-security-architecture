@@ -77,6 +77,13 @@ resource "aws_s3_object" "identity_demo_hello" {
   bucket  = aws_s3_bucket.identity_demo.id
   key     = "hello-from-stage2.txt"
   content = "pod identity works - scoped to this bucket only\n"
+
+  # 암호화를 업로드 요청에 직접 지정한다 (2026-10-25 세션에서 AES256 으로 올라간 것을 확인).
+  #   위 버킷 기본 암호화와 이 객체는 서로 의존하지 않아 같은 apply 에서 동시에 만들어진다.
+  #   객체가 먼저 올라가면 그 시점의 기본값(SSE-S3 = AES256)이 적용되고, 기본값은 나중에 바뀌어도
+  #   이미 있는 객체를 다시 암호화하지 않는다. → 순서(depends_on)에 기대지 않고 요청 자체에 명시.
+  server_side_encryption = "aws:kms"
+  bucket_key_enabled     = true
 }
 
 # ── 앱 역할: 버킷 1개 읽기로 핀포인트 (LBC 최소권한과 같은 철학, D13) ──

@@ -143,8 +143,12 @@ output "s4_verify_d9_no_env" {
 }
 
 output "s4_verify_d9_tmpfs" {
-  description = "④-3 tmpfs 마운트 확인 = 디스크에 기록되지 않음"
-  value       = "kubectl exec deploy/secrets-granted -- mount | Select-String 'secrets-store'"
+  description = <<-EOT
+    ④-3 tmpfs 마운트 확인 = 디스크에 기록되지 않음.
+    'tmpfs /mnt/secrets-store tmpfs ro,...' 한 줄이 정상 (메모리 파일시스템 · 읽기 전용).
+    aws-cli 이미지에는 mount 명령이 없어 커널이 보여주는 /proc/mounts 를 직접 읽는다 (2026-10-25 세션 확인).
+  EOT
+  value       = "kubectl exec deploy/secrets-granted -- cat /proc/mounts | Select-String 'secrets-store'"
 }
 
 # ── 보너스: 키 정책 ViaService 경계 실증 ──────────────────
