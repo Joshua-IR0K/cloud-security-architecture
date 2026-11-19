@@ -22,7 +22,7 @@
 #   · ECR Public 미러 — Docker Hub 익명 pull 의 IP 당 rate limit 회피 (기존 원칙 유지)
 # ============================================================
 
-FROM public.ecr.aws/nginx/nginx-unprivileged:1.30.6-alpine-slim@sha256:ea8a305bb7bff1e622c8223a097bf5c7664d36b05371717e23dc69972e1924e6
+FROM public.ecr.aws/nginx/nginx-unprivileged:1.30.7-alpine-slim@sha256:8432c57ac86f178741af2b89948bd9087cb9df1c415bc1ab4d23735c4f0e3e61
 
 # 패키지 갱신·파일 배치는 root 권한이 필요하다 — 빌드 구간만 root, 마지막에 101 로 되돌린다
 USER root
