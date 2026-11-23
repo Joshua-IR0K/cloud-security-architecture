@@ -1,11 +1,5 @@
-# 네이밍 관용구: 01/02/03 과 동일 — "/${var.project_name}/<stack>/<name>"
-#
-# 발행자와 CI 특성:
-#   network/*  ← 01 (영속) ┐
-#   security/* ← 02 (영속) ┴ 03 이 destroy 상태여도 조회 가능
-#   workload/eks_target_group_arn ← 03 (임시) — 03 이 내려가 있으면
-#     ParameterNotFound 로 plan 실패. 04 를 상시 CI plan 에서 제외한
-#     유일한 원인이 이 한 줄
+# 경로 규칙 "/${var.project_name}/<stack>/<name>". network·security 는 영속 스택이 발행하고,
+# workload/eks_target_group_arn 은 03 이 내려가 있으면 없어서 plan 이 실패한다 — 04 를 CI plan 에서 뺀 이유.
 
 data "aws_caller_identity" "current" {}
 
@@ -19,10 +13,7 @@ data "aws_ssm_parameter" "private_subnet_ids" {
 
 # ALB SG 소유자는 01(영속 SG) — 03 경유 재발행 없이 소유자에게서 직접 읽음
 
-# APP SG — 노드 ENI 에 추가 부착
-#   ALB SG 의 egress 가 APP SG 를 향하도록 01 에서 설계돼 있었음(EC2 전제).
-#   EKS 노드는 모듈이 만든 별도 SG 를 쓰므로 ALB→파드 경로가 끊김 →
-#   노드에 APP SG 를 함께 붙여 기존 검증된 경계 체인을 그대로 재사용.
+# APP SG — 노드에 추가로 단다 (eks.tf). 01 의 ALB egress 가 APP SG 를 향한다
 data "aws_ssm_parameter" "app_sg_id" {
   name = "/${var.project_name}/network/app_sg_id"
 }
@@ -42,16 +33,13 @@ data "aws_ssm_parameter" "eks_tg_arn" {
 }
 
 locals {
-  # nonsensitive(): SSM data source 의 value 는 provider 가 일괄 sensitive 마킹함.
-  # 이 값들(ARN/ID)은 비밀이 아니고, sensitive 상태로 두면
-  #   - outputs.tf 의 verify 명령 output 이 "Output refers to sensitive values" 로 plan 실패
-  #   - TGB yaml_body 전체가 sensitive 로 물들어 diff 가 가려짐
+  # nonsensitive(): SSM data 값은 provider 가 일괄 sensitive 로 표시한다. 여기 값은 식별자(ARN·ID)라 풀어 둔다 — 안 풀면 출력과 TGB diff 가 가려진다.
   # ⚠ 진짜 비밀(Okta secret 등)에는 절대 사용 금지 — 여기는 식별자만.
-  vpc_id             = nonsensitive(data.aws_ssm_parameter.vpc_id.value)
-  private_subnet_ids = split(",", nonsensitive(data.aws_ssm_parameter.private_subnet_ids.value))
-  app_sg_id          = nonsensitive(data.aws_ssm_parameter.app_sg_id.value)
+  vpc_id              = nonsensitive(data.aws_ssm_parameter.vpc_id.value)
+  private_subnet_ids  = split(",", nonsensitive(data.aws_ssm_parameter.private_subnet_ids.value))
+  app_sg_id           = nonsensitive(data.aws_ssm_parameter.app_sg_id.value)
   ebs_kms_key_arn     = nonsensitive(data.aws_ssm_parameter.ebs_kms_key_arn.value)
   secrets_kms_key_arn = nonsensitive(data.aws_ssm_parameter.secrets_kms_key_arn.value)
-  eks_tg_arn         = nonsensitive(data.aws_ssm_parameter.eks_tg_arn.value)
+  eks_tg_arn          = nonsensitive(data.aws_ssm_parameter.eks_tg_arn.value)
 
 }

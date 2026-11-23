@@ -1,6 +1,3 @@
-# SSM 파라미터 경로는 별도 변수 없이 data.tf 에서
-# "/${var.project_name}/<stack>/<name>" 인라인 보간 — 01/02/03 관용구와 통일.
-
 variable "region" {
   description = "AWS 리전"
   type        = string
@@ -45,14 +42,11 @@ variable "my_ip" {
     정직한 한계: state 와 DescribeCluster 응답에는 존재 — 통제 대상은
     "공개 산출물"이지 AWS 계정 내부가 아님.
   EOT
-  type      = string
-  sensitive = true
+  type        = string
+  sensitive   = true
 
-  # 가드레일: 외부 API 응답이 보안 통제(allowlist)로 유입되는 지점의 입력 검증.
-  # 엔드포인트 장애/변조로 쓰레기 값(HTML 에러 페이지, 빈 문자열, 다중 행)이
-  # 주입되면 apply 의 모호한 AWS 에러 대신 plan 에서 명확히 조기 차단.
-  # 정직한 한계: "형식이 올바른 남의 IP"(MITM)는 못 잡음 — 그건 HTTPS +
-  # AWS 운영 엔드포인트(checkip.amazonaws.com) 신뢰로 커버하는 계층.
+  # 외부 응답(checkip)이 보안 통제(허용 목록)로 들어가는 지점이라 형식을 검증해 쓰레기 값을 plan 에서 막는다.
+  # 한계: 형식이 맞는 남의 IP 는 못 잡는다 — 그건 HTTPS 와 AWS 엔드포인트 신뢰에 맡김
   validation {
     condition     = can(regex("^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$", var.my_ip))
     error_message = "my_ip 가 단일 IPv4 형식이 아님 — TF_VAR_my_ip 주입 누락 또는 IP echo 엔드포인트 장애/변조 의심. allowlist 오염 방지를 위해 중단."
@@ -89,7 +83,7 @@ variable "node_instance_type" {
   default     = "t3.medium"
 }
 
-# S2: 아이덴티티 마이그레이션 안전 게이트
+# 노드 역할 CNI 정책 부착 여부
 variable "cni_node_role_policy_attached" {
   description = <<-EOT
     노드롤에 AmazonEKS_CNI_Policy 를 유지할지 (기본 true = 안전).

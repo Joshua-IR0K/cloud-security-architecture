@@ -30,7 +30,7 @@ output "s2_node_role_policies" {
   value       = "aws iam list-attached-role-policies --role-name ${module.eks.eks_managed_node_groups["default"].iam_role_name} --query \"AttachedPolicies[].PolicyName\""
 }
 
-# S4 (AWS 평면)
+# 시크릿 데모 (AWS 쪽)
 
 output "s4_secret_arn" {
   description = "S4 데모 시크릿 ARN — 05-k8s SecretProviderClass 가 참조"
