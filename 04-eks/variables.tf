@@ -1,10 +1,5 @@
-# ============================================================
-# 04-eks/variables.tf
-# ============================================================
 # SSM 파라미터 경로는 별도 변수 없이 data.tf 에서
 # "/${var.project_name}/<stack>/<name>" 인라인 보간 — 01/02/03 관용구와 통일.
-# (실발행명 대조 완료 2026-07 — ADAPTER_RECONCILIATION.md)
-# ============================================================
 
 variable "region" {
   description = "AWS 리전"
@@ -30,7 +25,6 @@ variable "kubernetes_version" {
   default     = "1.35"
 }
 
-# ── API 엔드포인트 (결정 #7: 혼합 모드) ───────────────────
 variable "my_ip" {
   description = <<-EOT
     kubectl 을 실행할 내 공인 IP (예: "1.2.3.4" — /32 는 자동 부착).
@@ -65,7 +59,6 @@ variable "my_ip" {
   }
 }
 
-# ── 노드그룹 (결정 #6: 스테이지별 다이얼 1→2) ─────────────
 variable "node_desired_size" {
   description = "노드 수 — 생성 시점 초기값으로만 반영됨 (운영 중 스케일은 CLI, 런북 §4)"
   type        = number
@@ -96,7 +89,7 @@ variable "node_instance_type" {
   default     = "t3.medium"
 }
 
-# ── Stage 2: 아이덴티티 마이그레이션 안전 게이트 ──────────
+# S2: 아이덴티티 마이그레이션 안전 게이트
 variable "cni_node_role_policy_attached" {
   description = <<-EOT
     노드롤에 AmazonEKS_CNI_Policy 를 유지할지 (기본 true = 안전).
@@ -115,7 +108,6 @@ variable "cni_node_role_policy_attached" {
   default     = true
 }
 
-# ── Stage 4: 시크릿 회전 트리거 ───────────────────────────
 variable "demo_secret_version" {
   description = <<-EOT
     write-only 인자(secret_string_wo)의 버전 트리거.

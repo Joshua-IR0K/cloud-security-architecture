@@ -1,9 +1,4 @@
-# ============================================================
-# 04-eks/outputs.tf — AWS 평면 (클러스터 정보 · IAM 증거)
-# ============================================================
-# kubectl 검증 헬퍼는 05-k8s/outputs.tf 로 이동 (평면 분리).
 # 여기 남은 것은 AWS API 로 확인하는 것 + 05 가 참조할 식별자.
-# ============================================================
 
 output "cluster_name" {
   description = "EKS 클러스터 이름"
@@ -35,7 +30,7 @@ output "s2_node_role_policies" {
   value       = "aws iam list-attached-role-policies --role-name ${module.eks.eks_managed_node_groups["default"].iam_role_name} --query \"AttachedPolicies[].PolicyName\""
 }
 
-# ── Stage 4 (AWS 평면) ────────────────────────────────────
+# S4 (AWS 평면)
 
 output "s4_secret_arn" {
   description = "S4 데모 시크릿 ARN — 05-k8s SecretProviderClass 가 참조"

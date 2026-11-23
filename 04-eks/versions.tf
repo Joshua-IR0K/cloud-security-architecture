@@ -1,13 +1,5 @@
-# ============================================================
-# 04-eks/versions.tf — AWS 평면 전용 프로바이더 핀
-# ============================================================
-# kubernetes/helm/kubectl 은 05-k8s 로 이동 (스택 분리).
-# 프로바이더가 하나뿐이라 init 이 빨라지고, K8s 프로바이더의
-# eager 검증 문제가 이 스택에서 원천 소멸.
-# ============================================================
-
 terraform {
-  # Terraform 버전 핀 (D26)
+  # Terraform 버전 핀
   #   기술적 최소 요건은 1.11 — write-only 인자(secret_string_wo)가 도입된 버전.
   #   그런데 하한만 두면 로컬이 CI(1.14)보다 앞서가는 걸 막지 못한다.
   #   state 는 상위 버전이 쓰면 하위 버전이 읽지 못하므로(단방향),
@@ -24,7 +16,7 @@ terraform {
       #    secret_string ↔ secret_string_wo 전환)
       version = ">= 6.50, < 7.0"
     }
-    # Stage 4: ephemeral "random_password" — 값이 state 에 남지 않는 생성기
+    # S4: ephemeral "random_password" — 값이 state 에 남지 않는 생성기
     random = {
       source  = "hashicorp/random"
       version = "~> 3.6"

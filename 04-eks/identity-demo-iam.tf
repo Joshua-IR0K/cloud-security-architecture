@@ -1,7 +1,3 @@
-# ============================================================
-# 04-eks/identity-test-workload.tf — 앱 워크로드 Pod Identity 실증 (Stage 2)
-# ============================================================
-# BREAK → BUILD → VERIFY (순서가 곧 서사):
 #   ① identity-denied (SA 역할 없음) 에서 S3 호출 → 자격증명 부재로 실패
 #      = "기본 거부" + hop-limit=1(노드롤 IMDS 폴백 차단) 이중 실증
 #      ⚠ 이게 "성공"하면 그게 더 큰 문제 — IMDS 경로가 열려 노드롤을
@@ -9,11 +5,10 @@
 #   ② 전용 미니 버킷 + 그 버킷 "하나"로 스코프된 역할 + Pod Identity 연결
 #   ③ identity-granted: 대상 버킷 ls 성공 / 전체 버킷 목록 → AccessDenied
 #
-# 배치 결정(확정): 리소스 전부 04(destroyable) — 클린 리빌드 때 함께 소멸.
+# 배치 결정: 리소스 전부 04(destroyable) — 클린 리빌드 때 함께 소멸.
 #   영속 스택(02)에 데모 의존성을 만들지 않음.
-# ============================================================
 
-# ── 데모 대상: 전용 미니 S3 버킷 ──────────────────────────
+# 데모 대상: 전용 미니 S3 버킷
 resource "aws_s3_bucket" "identity_demo" {
   # 버킷명은 글로벌 유일 — 계정 ID suffix 로 결정론적 유일성 확보
   bucket        = "${var.project_name}-s2-identity-demo-${data.aws_caller_identity.current.account_id}"
@@ -28,7 +23,7 @@ resource "aws_s3_bucket_public_access_block" "identity_demo" {
   restrict_public_buckets = true
 }
 
-# ── [3단계 파트 4] 데모 버킷도 기본 보안 설정 (Checkov CKV_AWS_145 · CKV_AWS_21 · CKV2_AWS_61) ──
+# 데모 버킷도 기본 보안 설정 (Checkov CKV_AWS_145 · CKV_AWS_21 · CKV2_AWS_61)
 # 사이클마다 지워지는 버킷이라 비용·운영 부담이 없어 skip 대신 고친다.
 # 암호화: AWS 관리형 키(aws/s3). 파드는 S3 를 거쳐서만 읽으므로 역할에 KMS 권한을 더할 필요가 없다
 #   (aws/s3 키 정책이 "이 계정 주체 + S3 경유" 사용을 허용) — S2 실증 내용은 그대로다.
@@ -86,7 +81,7 @@ resource "aws_s3_object" "identity_demo_hello" {
   bucket_key_enabled     = true
 }
 
-# ── 앱 역할: 버킷 1개 읽기로 핀포인트 (LBC 최소권한과 같은 철학, D13) ──
+# 앱 역할: 버킷 1개 읽기로 핀포인트 (LBC 최소권한과 같은 철학)
 data "aws_iam_policy_document" "identity_demo_trust" {
   statement {
     effect = "Allow"
