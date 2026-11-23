@@ -1,15 +1,6 @@
-# ============================================================
-# 05-k8s/providers.tf — K8s 평면 전용
-# ============================================================
-# 분리 전과 결정적으로 다른 점:
-#   host/CA 가 data.aws_eks_cluster (= 이미 존재하는 실제 값)에서 오므로
-#   unknown 이 될 수 없다 → alekc/kubectl 의 eager 검증이 항상 통과.
-#   → -target 안무 불필요, destroy 도 정상 동작.
-#
-# exec 인증: 프로바이더가 API 를 칠 "그 순간" 토큰을 발급받는다.
-#   data.aws_eks_cluster_auth 로 미리 뜨면 15분 만료에 걸릴 수 있음.
-#   ⚠ aws CLI v2 가 PATH 에 있어야 하고, ambient 자격증명(AWS_PROFILE)을 사용.
-# ============================================================
+# exec 인증. 프로바이더가 API를 부르는 그 순간에 토큰을 받는다.
+# data.aws_eks_cluster_auth로 미리 받아 두면 15분 만료에 걸릴 수 있다.
+# aws CLI v2가 PATH에 있어야 하고, 지금 셸의 자격증명(AWS_PROFILE)을 쓴다.
 
 provider "aws" {
   region = var.region
@@ -32,7 +23,7 @@ provider "kubernetes" {
 }
 
 provider "helm" {
-  # helm provider v3: kubernetes 가 블록이 아니라 "속성(=)" 문법
+  # helm provider v3에서는 kubernetes가 블록이 아니라 속성(=) 문법이다.
   kubernetes = {
     host                   = local.cluster_endpoint
     cluster_ca_certificate = local.cluster_ca

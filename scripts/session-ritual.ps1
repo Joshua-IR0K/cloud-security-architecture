@@ -1,7 +1,4 @@
-﻿# ============================================================
-# scripts/session-ritual.ps1 — 세션 시작 리추얼 (매 세션 1회)
-# ============================================================
-# 역할 3개:
+﻿# 역할 3개:
 #   1) AWS_PROFILE 설정
 #   2) 현재 공인 IPv4 조회 → TF_VAR_my_ip 주입 (디스크·VCS 무접촉)
 #   3) 기존 클러스터 allowlist 와의 "드리프트 감지" — 관리 평면(AWS API)은
@@ -10,7 +7,6 @@
 # 설계 원칙: 스크립트는 관찰만, 인프라 변경은 명시적 terraform 명령으로.
 #   (드리프트 발견 시 자동 복구하지 않고 복구 명령을 "안내"만 한다 —
 #    세션 스크립트가 2~5분짜리 클러스터 업데이트를 몰래 수행하지 않도록)
-# ============================================================
 
 param(
   [string]$ClusterName = "joshua-eks",
@@ -21,9 +17,9 @@ $ErrorActionPreference = "Stop"
 $env:AWS_PROFILE = $AwsProfile
 Write-Host "[ritual] AWS_PROFILE = $AwsProfile"
 
-# ── 1) 현재 공인 IPv4 조회 ─────────────────────────────────
+# 1) 현재 공인 IPv4 조회
 # curl.exe -4 : 듀얼스택 회선에서 IPv6 로 붙어 IPv6 주소가 반환되는 것을
-#               원천 차단 (외부 리뷰 제안 채택 — Invoke-RestMethod 대비 개선)
+#               원천 차단
 # -f          : HTTP 에러 시 본문 대신 실패 종료 (에러 페이지 캡처 방지)
 # --max-time 5: 무한 대기 방지
 $ip = & curl.exe -4fsS --max-time 5 https://checkip.amazonaws.com
@@ -41,7 +37,7 @@ if ($ip -notmatch $ipv4) {
 $env:TF_VAR_my_ip = $ip
 Write-Host "[ritual] TF_VAR_my_ip = $ip  (Terraform '입력 평면' 갱신 완료)"
 
-# ── 2) allowlist 드리프트 감지 (관리 평면 — 잠김과 무관하게 동작) ──
+# 2) allowlist 드리프트 감지 (관리 평면 — 잠김과 무관하게 동작)
 $previousErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 

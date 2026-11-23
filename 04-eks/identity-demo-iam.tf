@@ -1,23 +1,10 @@
-# ============================================================
-# 04-eks/identity-test-workload.tf — 앱 워크로드 Pod Identity 실증 (Stage 2)
-# ============================================================
-# BREAK → BUILD → VERIFY (순서가 곧 서사):
-#   ① identity-denied (SA 역할 없음) 에서 S3 호출 → 자격증명 부재로 실패
-#      = "기본 거부" + hop-limit=1(노드롤 IMDS 폴백 차단) 이중 실증
-#      ⚠ 이게 "성공"하면 그게 더 큰 문제 — IMDS 경로가 열려 노드롤을
-#        상속했다는 뜻 (hop-limit 설정을 의심할 것)
-#   ② 전용 미니 버킷 + 그 버킷 "하나"로 스코프된 역할 + Pod Identity 연결
-#   ③ identity-granted: 대상 버킷 ls 성공 / 전체 버킷 목록 → AccessDenied
-#
-# 배치 결정(확정): 리소스 전부 04(destroyable) — 클린 리빌드 때 함께 소멸.
-#   영속 스택(02)에 데모 의존성을 만들지 않음.
-# ============================================================
+# Pod Identity 데모: 버킷 하나로 묶은 역할을 identity-granted에만 연결한다. 리소스는 전부 04(세션) 스택을 지울 때 같이 사라진다.
+# identity-denied가 S3 호출에 성공하면 IMDS 경로가 열려서 노드 역할을 물려받았다는 뜻이다. hop limit 설정부터 의심할 것.
 
-# ── 데모 대상: 전용 미니 S3 버킷 ──────────────────────────
 resource "aws_s3_bucket" "identity_demo" {
-  # 버킷명은 글로벌 유일 — 계정 ID suffix 로 결정론적 유일성 확보
+  # 버킷 이름은 전역에서 유일해야 해서 계정 ID를 뒤에 붙인다.
   bucket        = "${var.project_name}-s2-identity-demo-${data.aws_caller_identity.current.account_id}"
-  force_destroy = true # 데모 객체가 남아 있어도 destroy 가능 (사이클 규율)
+  force_destroy = true # 데모 객체가 남아 있어도 destroy할 수 있게(사이클마다 깔끔하게)
 }
 
 resource "aws_s3_bucket_public_access_block" "identity_demo" {
@@ -28,10 +15,7 @@ resource "aws_s3_bucket_public_access_block" "identity_demo" {
   restrict_public_buckets = true
 }
 
-# ── [3단계 파트 4] 데모 버킷도 기본 보안 설정 (Checkov CKV_AWS_145 · CKV_AWS_21 · CKV2_AWS_61) ──
-# 사이클마다 지워지는 버킷이라 비용·운영 부담이 없어 skip 대신 고친다.
-# 암호화: AWS 관리형 키(aws/s3). 파드는 S3 를 거쳐서만 읽으므로 역할에 KMS 권한을 더할 필요가 없다
-#   (aws/s3 키 정책이 "이 계정 주체 + S3 경유" 사용을 허용) — S2 실증 내용은 그대로다.
+# 데모 버킷도 기본 보안 설정을 건다(CKV_AWS_145·21, CKV2_AWS_61). 암호화는 aws/s3. 파드는 S3를 거쳐서만 읽어서 역할에 KMS 권한이 필요 없다.
 resource "aws_s3_bucket_server_side_encryption_configuration" "identity_demo" {
   bucket = aws_s3_bucket.identity_demo.id
 
@@ -51,7 +35,7 @@ resource "aws_s3_bucket_versioning" "identity_demo" {
   }
 }
 
-# 버전이 쌓이지 않게 — 이전 버전·미완료 업로드는 1일 뒤 정리 (force_destroy 와 함께 destroy 도 깨끗하다)
+# 버전이 쌓이지 않게 이전 버전과 미완료 업로드는 1일 뒤 정리한다(force_destroy와 같이 destroy도 깔끔하다).
 resource "aws_s3_bucket_lifecycle_configuration" "identity_demo" {
   bucket = aws_s3_bucket.identity_demo.id
 
@@ -78,15 +62,12 @@ resource "aws_s3_object" "identity_demo_hello" {
   key     = "hello-from-stage2.txt"
   content = "pod identity works - scoped to this bucket only\n"
 
-  # 암호화를 업로드 요청에 직접 지정한다 (2026-10-25 세션에서 AES256 으로 올라간 것을 확인).
-  #   위 버킷 기본 암호화와 이 객체는 서로 의존하지 않아 같은 apply 에서 동시에 만들어진다.
-  #   객체가 먼저 올라가면 그 시점의 기본값(SSE-S3 = AES256)이 적용되고, 기본값은 나중에 바뀌어도
-  #   이미 있는 객체를 다시 암호화하지 않는다. → 순서(depends_on)에 기대지 않고 요청 자체에 명시.
+  # 암호화를 업로드 요청에 직접 적는다. 버킷 기본 암호화와 같은 apply에서 동시에 만들어져서 순서에 기댈 수 없다.
   server_side_encryption = "aws:kms"
   bucket_key_enabled     = true
 }
 
-# ── 앱 역할: 버킷 1개 읽기로 핀포인트 (LBC 최소권한과 같은 철학, D13) ──
+# 앱 역할: 버킷 1개 읽기만
 data "aws_iam_policy_document" "identity_demo_trust" {
   statement {
     effect = "Allow"
@@ -111,8 +92,7 @@ data "aws_iam_policy_document" "identity_demo_read" {
     actions   = ["s3:GetObject"]
     resources = ["${aws_s3_bucket.identity_demo.arn}/*"]
   }
-  # 의도적 부재: s3:ListAllMyBuckets
-  #   → "aws s3 ls"(전체 목록)는 AccessDenied = 스코프 증명의 세 번째 축
+  # 일부러 안 준 권한: s3:ListAllMyBuckets. 전체 목록 조회는 AccessDenied가 난다.
 }
 
 resource "aws_iam_role" "identity_demo" {
@@ -126,7 +106,7 @@ resource "aws_iam_role_policy" "identity_demo" {
   policy = data.aws_iam_policy_document.identity_demo_read.json
 }
 
-# 앱 워크로드용 연결 — LBC(인프라 컴포넌트, lb-controller.tf)와 목적 구분
+# 앱 워크로드용 연결. LBC(인프라 컴포넌트, lb-controller.tf)와는 목적이 다르다.
 resource "aws_eks_pod_identity_association" "identity_demo" {
   cluster_name    = module.eks.cluster_name
   namespace       = "default"

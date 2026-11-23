@@ -1,17 +1,3 @@
-# ============================================================
-# 01-network/ssm_outputs.tf — 다른 스택으로 값 전달 (SSM)
-# ============================================================
-#
-# 왜 SSM Parameter Store인가:
-#   terraform_remote_state도 가능하지만 SSM이 더 안전함
-#   - remote_state: state 파일 전체에 접근 권한 필요 (과도)
-#   - SSM: 필요한 값만 선택적으로 공유 (최소 권한)
-#   - SSM은 IAM 정책으로 읽기 권한을 세밀하게 제어 가능
-#   - 비용: Standard 파라미터 무료
-#
-# ============================================================
-
-# ── VPC ────────────────────────────────────────────────────
 resource "aws_ssm_parameter" "vpc_id" {
   name  = "/${var.project_name}/network/vpc_id"
   type  = "String"
@@ -20,7 +6,6 @@ resource "aws_ssm_parameter" "vpc_id" {
   tags = { Name = "${var.project_name}-vpc-id" }
 }
 
-# ── Public Subnets ─────────────────────────────────────────
 resource "aws_ssm_parameter" "public_subnet_ids" {
   name  = "/${var.project_name}/network/public_subnet_ids"
   type  = "StringList"
@@ -29,7 +14,6 @@ resource "aws_ssm_parameter" "public_subnet_ids" {
   tags = { Name = "${var.project_name}-public-subnet-ids" }
 }
 
-# ── Private Subnets ────────────────────────────────────────
 resource "aws_ssm_parameter" "private_subnet_ids" {
   name  = "/${var.project_name}/network/private_subnet_ids"
   type  = "StringList"
@@ -38,7 +22,7 @@ resource "aws_ssm_parameter" "private_subnet_ids" {
   tags = { Name = "${var.project_name}-private-subnet-ids" }
 }
 
-# ── Private Route Table ID (워크로드가 NAT 라우팅 추가 시 필요) ──
+# 03이 NAT 경로를 추가할 라우트 테이블
 resource "aws_ssm_parameter" "private_route_table_id" {
   name  = "/${var.project_name}/network/private_route_table_id"
   type  = "String"
@@ -47,7 +31,6 @@ resource "aws_ssm_parameter" "private_route_table_id" {
   tags = { Name = "${var.project_name}-private-rt-id" }
 }
 
-# ── Security Group IDs ─────────────────────────────────────
 resource "aws_ssm_parameter" "alb_sg_id" {
   name  = "/${var.project_name}/network/alb_sg_id"
   type  = "String"
@@ -64,7 +47,7 @@ resource "aws_ssm_parameter" "app_sg_id" {
   tags = { Name = "${var.project_name}-app-sg-id" }
 }
 
-# ── First Public Subnet ID (NAT GW 배치용) ─────────────────
+# 03이 NAT 게이트웨이를 놓을 서브넷
 resource "aws_ssm_parameter" "first_public_subnet_id" {
   name  = "/${var.project_name}/network/first_public_subnet_id"
   type  = "String"
@@ -73,9 +56,7 @@ resource "aws_ssm_parameter" "first_public_subnet_id" {
   tags = { Name = "${var.project_name}-first-public-subnet-id" }
 }
 
-
-# ACM 인증서 ARN — workload가 참조 (검증 완료 후에만 파라미터 생성되도록
-# validation 리소스의 certificate_arn을 사용)
+# 검증이 끝난 다음에만 만들어지게 validation 리소스의 certificate_arn을 쓴다.
 resource "aws_ssm_parameter" "acm_cloudfront_cert_arn" {
   name  = "/${var.project_name}/network/acm_cloudfront_cert_arn"
   type  = "String"
@@ -87,13 +68,3 @@ resource "aws_ssm_parameter" "acm_alb_cert_arn" {
   type  = "String"
   value = aws_acm_certificate_validation.alb.certificate_arn
 }
-
-
-# ── IGW ID (워크로드에서 참조 필요 시) ─────────────────────
-# resource "aws_ssm_parameter" "igw_id" {
-#  name  = "/${var.project_name}/network/igw_id"
-#  type  = "String"
-#  value = aws_internet_gateway.main.id
-#
-#  tags = { Name = "${var.project_name}-igw-id" }
-#} 

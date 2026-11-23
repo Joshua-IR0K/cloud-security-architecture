@@ -1,17 +1,6 @@
-# ============================================================
-# 03-workload/variables_cutover.tf — blue-green 컷오버 다이얼 (신규)
-# ============================================================
-#
-# 사용법:
-#   ① 초기 상태(기본값): EC2 100 / EKS 0  → EKS TG 는 비어 있어도 무해
-#   ④ 컷오버:  terraform apply \
-#                -var 'ec2_traffic_weight=0' -var 'eks_traffic_weight=100'
-#   롤백:      weight 원복 apply
-#              (실장애 시 콘솔 ModifyRule 로 먼저 되돌리고 → state 정합)
-#
-# 코드 수정 없이 변수만으로 트래픽을 옮기는 것이 목적
-# (canary 도 가능: 90/10 → 50/50 → 0/100)
-# ============================================================
+# 트래픽 전환은 코드 수정 없이 이 두 변수로만 한다. 기본값은 EC2 100 / EKS 0이라 비어 있는 EKS 대상 그룹으로 요청이 가지 않는다.
+#   전환: terraform apply -var 'ec2_traffic_weight=0' -var 'eks_traffic_weight=100'  (05로 파드가 등록된 뒤)
+#   롤백: 가중치를 되돌려서 apply. 실제 장애 때는 콘솔에서 규칙 가중치를 먼저 되돌리고 state를 맞춘다.
 
 variable "ec2_traffic_weight" {
   description = "oidc_auth 룰 forward 에서 EC2(blue) 타깃그룹 가중치 (0~999)"

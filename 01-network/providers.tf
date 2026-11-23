@@ -1,7 +1,3 @@
-# ============================================================
-# 01-network/providers.tf
-# ============================================================
-
 terraform {
   required_version = ">= 1.5.0"
 
@@ -14,7 +10,7 @@ terraform {
 }
 
 provider "aws" {
-  region  = var.aws_region
+  region = var.aws_region
 
   default_tags {
     tags = {
@@ -27,10 +23,10 @@ provider "aws" {
   }
 }
 
-# Cloudfront용 인증서 us_east_1 발급 필수(AWS 제약)
+# CloudFront 인증서는 us-east-1에서만 발급된다(AWS 제약).
 provider "aws" {
-  alias   = "us_east_1"
-  region  = "us-east-1"
+  alias  = "us_east_1"
+  region = "us-east-1"
 
   default_tags {
     tags = {

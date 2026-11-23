@@ -20,7 +20,7 @@ crash.*.log
 Thumbs.db
 
 
-# Stage 7 로컬 작업 파일 (stage7-wip 브랜치에서 사용)
+# 이미지 서명 작업 때 쓰던 로컬 파일 (지금 워크플로에는 연결 안 됨)
 cosign.pub
 pk.b64
 sc-full.json

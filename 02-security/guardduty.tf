@@ -1,47 +1,20 @@
-# ============================================================
-# guardduty.tf — Amazon GuardDuty (위협 탐지)
-# ============================================================
-#
-# 역할: ML 기반으로 악의적 활동과 이상 행위를 자동 탐지
-#
-# 분석 대상:
-#   - CloudTrail 관리 이벤트 (API 호출 이상)
-#   - VPC Flow Logs (네트워크 이상)
-#   - DNS 로그 (악성 도메인 통신)
-#
-# Finding 유형 예시:
-#   - UnauthorizedAccess:IAMUser/MaliciousIPCaller
-#   - Recon:EC2/PortProbeUnprotectedPort
-#   - CryptoCurrency:EC2/BitcoinTool.B!DNS
-#
-# 비용: 30일 무료 → 이후 분석량 기반 과금 (테스트 수준 $3~5/월)
-#
-# ============================================================
-
-# ── GuardDuty 활성화 ──────────────────────────────────────
 resource "aws_guardduty_detector" "main" {
-  #checkov:skip=CKV2_AWS_3:단일 계정 범위 — Organizations 수준 활성화는 Phase 5에서 구성
+  #checkov:skip=CKV2_AWS_3:단일 계정 구성 — 멀티 계정 활성화는 README 다음 단계
   enable = true
 
-  # Finding 발행 주기: 15분 (가장 빠른 설정)
-  # 실시간은 아니지만, EventBridge를 통해 Finding 생성 즉시 알림 가능
   finding_publishing_frequency = "FIFTEEN_MINUTES"
 
-  # 데이터 소스 설정
   datasources {
-    # S3 보호: S3 데이터 이벤트 분석
     s3_logs {
       enable = true
     }
 
-    # EKS 보호: Phase 4B에서 EKS 전환 후 자동 적용
     kubernetes {
       audit_logs {
-        enable = false # Phase 4B에서 true로 변경
+        enable = false
       }
     }
 
-    # Malware Protection
     malware_protection {
       scan_ec2_instance_with_findings {
         ebs_volumes {

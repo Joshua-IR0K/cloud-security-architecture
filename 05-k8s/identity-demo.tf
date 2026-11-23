@@ -1,14 +1,6 @@
-# ============================================================
-# 05-k8s/identity-demo.tf — Pod Identity 실증 워크로드 (K8s 평면)
-# ============================================================
-# S3 버킷·IAM 역할·association 은 04-eks 소유. 여기는 SA + 파드만.
-# BREAK(denied) → BUILD(granted) → VERIFY(scope) 3축은 outputs.tf 참조.
-#
-# Checkov (3단계 파트 4): 이 파일의 데모 SA·파드는 리소스마다 #checkov:skip 으로 K8s 하드닝 항목을 제외한다.
-#   실증 목적상 의도적으로 최소 구성(sleep 데모 파드·공용 이미지 태그·default 네임스페이스)이며,
-#   하드닝 기준(비루트·읽기 전용 루트·probe·digest 등)은 운영 워크로드 nginx(app 네임스페이스)에 적용·검증한다.
+# 버킷, IAM 역할, 연결은 04에서 만든다. 여기서는 SA와 데모 파드 2개(denied/granted)만 다룬다.
+# 데모 SA·파드는 하드닝 항목을 리소스마다 checkov skip으로 뺐다. 하드닝은 운영 nginx(app)에 건다.
 
-# ── K8s: SA + 파드 2개 (denied / granted) ─────────────────
 resource "kubernetes_service_account_v1" "identity_demo" {
   #checkov:skip=CKV_K8S_21:S2 실증 픽스처 — default 네임스페이스는 의도 (운영 워크로드는 app 네임스페이스)
   metadata {
@@ -18,18 +10,11 @@ resource "kubernetes_service_account_v1" "identity_demo" {
 }
 
 locals {
-  # latest 사용 근거: S2 한정 데모 파드(사이클마다 소멸)라 digest 핀 원칙(D11)의
-  # 적용 대상인 "서비스 워크로드"가 아님 — S5(ECR)·S7(서명/검증)에서 본편 적용.
+  # latest를 쓴다. 세션마다 지우는 데모 파드라 digest까지 고정할 필요가 없다(운영 nginx는 digest 고정).
   awscli_image = "public.ecr.aws/aws-cli/aws-cli:latest"
 }
 
-# ⚠ Stage 3 에서 bare Pod → Deployment 로 전환 (D23)
-#   이유 1 (강제): NetworkPolicy 는 ownerReferences 가 있는 파드에만 적용됨.
-#     standalone Pod 은 정책 대상이 되지 않아 세그멘테이션 실증이 불가능.
-#   이유 2 (개선): 트러블슈팅 #7(Pod Identity admission-time 주입 레이스)의
-#     복구가 `kubectl rollout restart deploy/...` 한 줄로 끝남
-#     (bare Pod 은 delete → terraform apply 왕복이 필요했음).
-#   ※ 검증 명령도 파드명 대신 `deploy/<name>` 참조로 변경됨 (outputs.tf)
+# bare Pod 말고 Deployment로 만든다. NetworkPolicy는 ownerReferences가 있는 파드에만 걸리고, 자격 주입이 늦게 붙으면 rollout restart로 살릴 수 있다.
 
 resource "kubernetes_deployment_v1" "identity_denied" {
   #checkov:skip=CKV_K8S_8,CKV_K8S_9,CKV_K8S_11,CKV_K8S_14,CKV_K8S_21,CKV_K8S_28,CKV_K8S_29,CKV_K8S_30,CKV_K8S_43:S2 실증 픽스처 — aws-cli sleep 파드(서버 프로세스 없음)·공용 이미지 태그·default 네임스페이스·기본 securityContext 를 의도적으로 유지. 하드닝 기준은 운영 nginx(app)에 적용·검증
@@ -49,7 +34,7 @@ resource "kubernetes_deployment_v1" "identity_denied" {
         labels = { app = "s2-demo", role = "denied" }
       }
       spec {
-        # service_account_name 미지정 = default SA = Pod Identity 연결 없음 (의도)
+        # service_account_name을 안 주면 default SA라 Pod Identity 연결이 없다(일부러 이렇게 둔다).
         container {
           name    = "awscli"
           image   = local.awscli_image
@@ -96,8 +81,7 @@ resource "kubernetes_deployment_v1" "identity_granted" {
     }
   }
 
-  # 연결이 파드보다 먼저 존재해야 admission-time 에 자격이 주입됨.
-  # 그래도 전파 지연 레이스(#7)는 남으므로, NoCredentials 시:
+  # 연결이 파드보다 먼저 있어야 파드가 만들어질 때 자격이 주입된다.
+  # 그래도 전파가 늦으면 NoCredentials가 날 수 있다. 그럴 땐 아래처럼 다시 띄운다.
   #   kubectl rollout restart deploy/identity-granted
-  # depends_on = [aws_eks_pod_identity_association.identity_demo]
 }

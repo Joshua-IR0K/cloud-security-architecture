@@ -7,7 +7,6 @@
 crash.log
 crash.*.log
 
-# Phase 3: terraform.tfvars에 Okta 시크릿 포함 — Git에 올리지 않음
 terraform.tfvars
 
 # IDE

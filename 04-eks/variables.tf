@@ -1,11 +1,3 @@
-# ============================================================
-# 04-eks/variables.tf
-# ============================================================
-# SSM 파라미터 경로는 별도 변수 없이 data.tf 에서
-# "/${var.project_name}/<stack>/<name>" 인라인 보간 — 01/02/03 관용구와 통일.
-# (실발행명 대조 완료 2026-07 — ADAPTER_RECONCILIATION.md)
-# ============================================================
-
 variable "region" {
   description = "AWS 리전"
   type        = string
@@ -30,7 +22,6 @@ variable "kubernetes_version" {
   default     = "1.35"
 }
 
-# ── API 엔드포인트 (결정 #7: 혼합 모드) ───────────────────
 variable "my_ip" {
   description = <<-EOT
     kubectl 을 실행할 내 공인 IP (예: "1.2.3.4" — /32 는 자동 부착).
@@ -51,21 +42,17 @@ variable "my_ip" {
     정직한 한계: state 와 DescribeCluster 응답에는 존재 — 통제 대상은
     "공개 산출물"이지 AWS 계정 내부가 아님.
   EOT
-  type      = string
-  sensitive = true
+  type        = string
+  sensitive   = true
 
-  # 가드레일: 외부 API 응답이 보안 통제(allowlist)로 유입되는 지점의 입력 검증.
-  # 엔드포인트 장애/변조로 쓰레기 값(HTML 에러 페이지, 빈 문자열, 다중 행)이
-  # 주입되면 apply 의 모호한 AWS 에러 대신 plan 에서 명확히 조기 차단.
-  # 정직한 한계: "형식이 올바른 남의 IP"(MITM)는 못 잡음 — 그건 HTTPS +
-  # AWS 운영 엔드포인트(checkip.amazonaws.com) 신뢰로 커버하는 계층.
+  # 외부 응답(checkip)이 보안 통제(허용 목록)로 들어가는 곳이라, 형식을 검증해서 이상한 값을 plan에서 막는다.
+  # 한계: 형식이 맞는 남의 IP는 못 잡는다. 그건 HTTPS와 AWS 엔드포인트 신뢰에 맡긴다.
   validation {
     condition     = can(regex("^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$", var.my_ip))
     error_message = "my_ip 가 단일 IPv4 형식이 아님 — TF_VAR_my_ip 주입 누락 또는 IP echo 엔드포인트 장애/변조 의심. allowlist 오염 방지를 위해 중단."
   }
 }
 
-# ── 노드그룹 (결정 #6: 스테이지별 다이얼 1→2) ─────────────
 variable "node_desired_size" {
   description = "노드 수 — 생성 시점 초기값으로만 반영됨 (운영 중 스케일은 CLI, 런북 §4)"
   type        = number
@@ -96,7 +83,7 @@ variable "node_instance_type" {
   default     = "t3.medium"
 }
 
-# ── Stage 2: 아이덴티티 마이그레이션 안전 게이트 ──────────
+# 노드 역할 CNI 정책 부착 여부
 variable "cni_node_role_policy_attached" {
   description = <<-EOT
     노드롤에 AmazonEKS_CNI_Policy 를 유지할지 (기본 true = 안전).
@@ -115,7 +102,6 @@ variable "cni_node_role_policy_attached" {
   default     = true
 }
 
-# ── Stage 4: 시크릿 회전 트리거 ───────────────────────────
 variable "demo_secret_version" {
   description = <<-EOT
     write-only 인자(secret_string_wo)의 버전 트리거.

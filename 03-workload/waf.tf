@@ -1,10 +1,3 @@
-# ============================================================
-# 03-workload/waf.tf — WAF WebACL (고비용 → 워크로드 스택)
-# ============================================================
-# WAF는 월 $5~10 → 임시 스택에 배치하여 비용 절감
-# 로그 S3 버킷은 02-security에 영속 보관 (destroy 후에도 로그 유지)
-# ============================================================
-
 resource "aws_wafv2_web_acl" "main" {
   provider = aws.us_east_1
 
@@ -148,8 +141,7 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
-  # Log4Shell(CVE-2021-44228) 등 알려진 악성 입력 차단
-  # 위협 기반 설계: JNDI lookup 패턴 등 명시적 방어 (CKV_AWS_192 대응)
+  # Log4Shell(CVE-2021-44228) 같은 알려진 악성 입력(CKV_AWS_192 대응)
   rule {
     name     = "known-bad-inputs"
     priority = 6
@@ -183,10 +175,10 @@ resource "aws_wafv2_web_acl" "main" {
   }
 }
 
-# WAF 로깅 — S3 버킷은 02-security 스택에서 관리
+# WAF 로깅. S3 버킷은 02-security 스택에서 관리한다.
 resource "aws_wafv2_web_acl_logging_configuration" "main" {
   provider = aws.us_east_1
 
-  log_destination_configs = [local.waf_log_bucket_arn] # ← SSM 참조
+  log_destination_configs = [local.waf_log_bucket_arn]
   resource_arn            = aws_wafv2_web_acl.main.arn
 }

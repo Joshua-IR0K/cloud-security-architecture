@@ -1,7 +1,3 @@
-# ============================================================
-# 03-workload/outputs.tf
-# ============================================================
-
 output "alb_dns_name" {
   description = "ALB DNS"
   value       = aws_lb.main.dns_name

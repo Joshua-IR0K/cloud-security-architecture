@@ -1,9 +1,3 @@
-# ============================================================
-# 02-security/vpc_flow_logs.tf — VPC Flow Logs (S3 직접 저장)
-# ============================================================
-# 01-network 스택의 VPC ID를 SSM에서 읽어서 Flow Logs 설정
-# ============================================================
-
 locals {
   flow_log_format = join(" ", [
     "$${version}", "$${account-id}", "$${interface-id}",
@@ -18,11 +12,11 @@ locals {
 }
 
 resource "aws_flow_log" "vpc_s3" {
-  vpc_id               = local.vpc_id # ← SSM에서 읽은 VPC ID
-  traffic_type         = "ALL"
-  log_destination_type = "s3"
-  log_destination      = aws_s3_bucket.flow_logs.arn
-  log_format           = local.flow_log_format
+  vpc_id                   = local.vpc_id
+  traffic_type             = "ALL"
+  log_destination_type     = "s3"
+  log_destination          = aws_s3_bucket.flow_logs.arn
+  log_format               = local.flow_log_format
   max_aggregation_interval = 600
 
   destination_options {
@@ -39,7 +33,7 @@ resource "aws_flow_log" "vpc_s3" {
 resource "aws_s3_bucket" "flow_logs" {
   bucket        = "${var.project_name}-flow-logs-${data.aws_caller_identity.current.account_id}"
   force_destroy = true
-  tags = { Name = "${var.project_name}-flow-logs" }
+  tags          = { Name = "${var.project_name}-flow-logs" }
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "flow_logs" {
@@ -47,21 +41,21 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "flow_logs" {
   rule {
     apply_server_side_encryption_by_default {
       sse_algorithm     = "aws:kms"
-      kms_master_key_id = aws_kms_key.logs.arn # Phase 4A.5: 전용 CMK
+      kms_master_key_id = aws_kms_key.logs.arn
     }
-    bucket_key_enabled = true # S3 Bucket Key로 KMS 호출 비용 절감
+    bucket_key_enabled = true # S3 Bucket Key로 KMS 호출 비용을 줄인다
   }
 }
 
 resource "aws_s3_bucket_public_access_block" "flow_logs" {
-  bucket = aws_s3_bucket.flow_logs.id
+  bucket                  = aws_s3_bucket.flow_logs.id
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
 }
 
-# 버저닝 — 로그 변조/덮어쓰기 방어 (CKV_AWS_21 대응)
+# 버저닝. 로그 변조나 덮어쓰기를 막는다(CKV_AWS_21 대응).
 resource "aws_s3_bucket_versioning" "flow_logs" {
   bucket = aws_s3_bucket.flow_logs.id
   versioning_configuration {
@@ -69,7 +63,7 @@ resource "aws_s3_bucket_versioning" "flow_logs" {
   }
 }
 
-# 라이프사이클 — FinOps: 30일 후 IA, 90일 후 Glacier, 1년 후 만료 (CKV2_AWS_61 대응)
+# 라이프사이클(FinOps). 30일 뒤 IA, 90일 뒤 Glacier, 1년 뒤 만료(CKV2_AWS_61 대응).
 resource "aws_s3_bucket_lifecycle_configuration" "flow_logs" {
   bucket = aws_s3_bucket.flow_logs.id
 

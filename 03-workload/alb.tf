@@ -1,24 +1,16 @@
-# ============================================================
-# 03-workload/alb.tf — ALB + OIDC 인증 (SSM 참조)
-# ============================================================
-# 변경: aws_security_group.alb.id → local.alb_sg_id
-#       aws_subnet.public[*].id → local.public_subnet_ids
-#       aws_vpc.main.id → local.vpc_id
-# ============================================================
-
 resource "aws_lb" "main" {
   #checkov:skip=CKV_AWS_150:삭제 보호 미적용 — workload는 FinOps 원칙상 의도적으로 destroy 가능한 임시 스택
-  #checkov:skip=CKV_AWS_91:액세스 로깅 보류 — Datadog SIEM(Phase 4A-3) 수집 대상 설계 시 일괄 결정 (HARDENING_BACKLOG)
+  #checkov:skip=CKV_AWS_91:ALB 액세스 로그 미수집 — 수집처 미정
   #checkov:skip=CKV2_AWS_28:WAF는 CloudFront에 연결(엣지 방어). ALB는 CloudFront 경유만 허용(Prefix List+X-Origin-Verify)하므로 ALB 직접 WAF 불필요
   name               = "${var.project_name}-alb"
   internal           = false
   load_balancer_type = "application"
-  security_groups    = [local.alb_sg_id]      # ← SSM 참조
-  subnets            = local.public_subnet_ids # ← SSM 참조
+  security_groups    = [local.alb_sg_id]
+  subnets            = local.public_subnet_ids
 
   enable_deletion_protection = false
 
-  # 비정상 HTTP 헤더 차단 — 헤더 스머글링 방어 (CKV_AWS_131 대응)
+  # 비정상 HTTP 헤더를 버린다. 헤더 스머글링 방어(CKV_AWS_131 대응).
   drop_invalid_header_fields = true
 
   tags = {
@@ -27,11 +19,11 @@ resource "aws_lb" "main" {
 }
 
 resource "aws_lb_target_group" "app" {
-  #checkov:skip=CKV_AWS_378:TG HTTP 사용 — TLS는 ALB에서 종료, 내부는 Private Subnet 격리 + X-Origin-Verify. 내부 e2e 암호화는 Phase 4B 재검토
+  #checkov:skip=CKV_AWS_378:TG HTTP — TLS 는 ALB 에서 종료하고, ALB→대상 구간은 프라이빗 서브넷 + SG 로 격리
   name     = "${var.project_name}-app-tg"
   port     = var.app_port
   protocol = "HTTP"
-  vpc_id   = local.vpc_id                        # ← SSM 참조
+  vpc_id   = local.vpc_id
 
   health_check {
     enabled             = true
@@ -56,7 +48,6 @@ resource "aws_lb_target_group_attachment" "web_test" {
   port             = var.app_port
 }
 
-# HTTP → HTTPS 리다이렉트
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
   port              = 80
@@ -77,7 +68,6 @@ resource "aws_lb_listener" "http" {
   }
 }
 
-# HTTPS Listener + OIDC
 resource "aws_lb_listener" "https" {
   load_balancer_arn = aws_lb.main.arn
   port              = 443
@@ -100,7 +90,6 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-# Origin Verify + OIDC 인증
 resource "aws_lb_listener_rule" "oidc_auth" {
   listener_arn = aws_lb_listener.https.arn
   priority     = 1
@@ -122,27 +111,24 @@ resource "aws_lb_listener_rule" "oidc_auth" {
     }
   }
 
-  # ── Phase 4B B-2: weighted forward (EC2 blue / EKS green 컷오버) ──
-  # 기존 in-place forward → weighted forward. EKS TG 를 weight 0 으로 미리
-  # 넣어두면 빈 TG flip race(502) 원천 차단. 컷오버는 weight 만으로 제어.
-  # (선행: eks_target_group.tf 의 aws_lb_target_group.eks +
-  #        variables_cutover.tf 의 weight 변수 2개)
+  # EC2(blue)·EKS(green) 가중치 forward. EKS 대상 그룹을 가중치 0으로 미리 붙여 두면 빈 그룹으로 넘어가면서 생기는 502 경합이 없다.
+  # 전환은 가중치 변수로만 한다(variables_cutover.tf).
   action {
     type = "forward"
 
     forward {
       target_group {
-        arn    = aws_lb_target_group.app.arn   # EC2 (blue)
-        weight = var.ec2_traffic_weight        # 기본 100
+        arn    = aws_lb_target_group.app.arn # EC2 (blue)
+        weight = var.ec2_traffic_weight
       }
 
       target_group {
-        arn    = aws_lb_target_group.eks.arn   # EKS (green)
-        weight = var.eks_traffic_weight        # 기본 0
+        arn    = aws_lb_target_group.eks.arn # EKS (green)
+        weight = var.eks_traffic_weight
       }
 
-      # 컷오버는 명시적 weight 로만 제어 → 세션 고정 불필요.
-      # duration 은 enabled=false 여도 필수 인자라 1.
+      # 전환은 명시적인 weight로만 조절하니까 세션 고정이 필요 없다.
+      # duration은 enabled=false여도 필수라서 1로 둔다.
       stickiness {
         enabled  = false
         duration = 1
@@ -150,8 +136,8 @@ resource "aws_lb_listener_rule" "oidc_auth" {
     }
   }
 
-  # 평소엔 CloudFront 가 보내는 값 하나, 교체 중 병행 구간엔 두 슬롯 모두 받는다 (origin_verify.tf)
-  # 여러 값은 OR 로 평가된다 — 하나라도 일치하면 이 규칙(OIDC → forward)으로 간다
+  # 평소엔 CloudFront가 보내는 값 하나만, 교체 중 병행 구간엔 두 슬롯 값을 다 받는다(origin_verify.tf).
+  # 여러 값은 OR로 평가돼서 하나라도 맞으면 이 규칙(OIDC 인증 후 forward)으로 간다.
   condition {
     http_header {
       http_header_name = "X-Origin-Verify"

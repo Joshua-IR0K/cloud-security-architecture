@@ -1,4 +1,4 @@
-# 04-eks — 01/02/03 스택과 동일 패턴 (기존 스택 .gitignore 와 대조 권장)
+# 04-eks. 01/02/03 스택과 같은 패턴이니 다른 스택 .gitignore와 맞춰 두면 된다.
 .terraform/
 *.tfstate
 *.tfstate.*
@@ -11,5 +11,3 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
-# 주의: .terraform.lock.hcl 은 여기 넣지 않는다 = 커밋 대상.
-# 프로바이더 해시를 고정하는 공급망 핀 (Actions SHA-pin 과 같은 원칙의 TF 버전)
