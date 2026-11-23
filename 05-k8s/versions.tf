@@ -21,7 +21,7 @@ terraform {
     }
     kubectl = {
       source  = "alekc/kubectl"
-      version = "~> 2.1"
+      version = "~> 3.0"
     }
     # CRD 등록이 퍼질 때까지 대기
     time = {
