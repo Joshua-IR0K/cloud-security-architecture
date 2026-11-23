@@ -1,36 +1,14 @@
-# ============================================================
-# .github/workflows/build-deploy.yml — Stage 6 CI/CD
-# ============================================================
-# S5 의 로컬 골든패스를 러너가 실행하고(S6-A), 검증된 아티팩트를
-# EKS 에 롤아웃한다(S6-B). 절차는 같고 실행 주체만 바뀐다.
-#
 # 두 job 의 러너가 다른 이유:
 #   build  : GitHub 호스티드 — 인터넷만 있으면 됨(ECR·GitHub)
 #   deploy : CodeBuild(VPC) — EKS 엔드포인트가 관리자 IP /32 로 제한돼 있어
 #            GitHub 러너로는 도달 불가. 러너 IP 대역을 allowlist 에 추가하는 대신
-#            컴퓨트를 VPC 안으로 옮긴다(D41).
-#
-# 소유권 (D42 Delegated Field Ownership):
-#   Terraform → Deployment 의 구조·보안(replica·probe·볼륨·SA·securityContext)
-#   CI        → 컨테이너 image 필드 하나
-#   → CI 는 Terraform state 를 건드리지 않고, K8s 권한도 이 Deployment 의
-#     get/patch 로 한정된다.
-#
-# ★ 모든 액션을 커밋 SHA 로 핀한다 (P1-5):
-#   태그(@v4)는 가변이다 — 2026.3 사건에서 공격자가 trivy-action 의 버전 태그
-#   76개를 악성 커밋으로 force-push 했다. 태그 참조는 그 순간 악성 코드를 실행한다.
-#   SHA 는 내용에 고정되므로 이 공격에 면역이다.
-#   → S5 의 ECR IMMUTABLE, S7 의 digest 서명과 같은 원리(이름이 아니라 내용으로 식별).
-#   ⚠ 핀만 하고 방치하면 오래된 액션을 쓰게 된다 → .github/dependabot.yml 로 자동 추적.
-#   ★ 아래 action은 2026-08-30 기준 검증된 release commit SHA로 고정했다.
-#     Dependabot의 github-actions 업데이트 PR로 새 SHA를 추적하고 사람이 검토 후 반영한다.
+#            컴퓨트를 VPC 안으로 옮긴다.
 #
 # 사전 준비 (레포 Variables):
 #   AWS_BUILD_ROLE_ARN   00-bootstrap output: github_actions_build_role_arn
 #   AWS_DEPLOY_ROLE_ARN  00-bootstrap output: github_actions_deploy_role_arn
 #   CODEBUILD_RUNNER     02-security output: codebuild_runner_project_name
 #   DEPLOY_ENABLED       "true" 로 설정해야 deploy job 실행 (S6-B 인프라 준비 후)
-# ============================================================
 
 name: Build and Deploy
 
@@ -57,9 +35,6 @@ env:
   AWS_REGION: ap-northeast-2
 
 jobs:
-  # ══════════════════════════════════════════════════════════
-  # S6-A — 빌드 / 스캔 / 푸시 / SBOM   (클러스터 불필요)
-  # ══════════════════════════════════════════════════════════
   build:
     name: Build, Scan, Push
     # ubuntu-latest 는 2026-10-19 부터 Ubuntu 26 으로 바뀐다 — 실행 환경이 조용히 바뀌지 않게 버전을 고정한다
@@ -73,7 +48,7 @@ jobs:
     steps:
       # egress 감사 — 빌드 중 예기치 않은 외부 통신을 관측 가능하게.
       # 2026.3 Trivy 태그 오염 같은 공격이 러너에서 자격증명을 유출하는
-      # 경로를 잡는 통제(4A.5 자산).
+      # 경로를 잡는 통제.
       - name: Harden Runner
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
         with:
@@ -102,7 +77,7 @@ jobs:
             echo "name=${REPO_URL#*/}"
           } >> "$GITHUB_OUTPUT"
 
-      # ── 태그 규약 ─────────────────────────────────────────
+      # 태그 규약
       #   S5: s5-<variant>-<sha>  (로컬)
       #   S6: s6-<sha>            (CI, 정상 경로)
       #       s6-vuln-<sha>       (게이트 차단 실증 — 푸시에 도달하지 않음)
@@ -122,7 +97,7 @@ jobs:
           fi
           echo "variant=$VARIANT" >> "$GITHUB_OUTPUT"
 
-      # ── IMMUTABLE ↔ rerun 충돌 해소 (P1-4) ────────────────
+      # IMMUTABLE ↔ rerun 충돌 해소
       # 같은 커밋을 rerun 하면 태그가 같아 푸시가 거부된다.
       # immutable 정책을 푸는 대신, 이미 있으면 **기존 아티팩트를 재사용**한다.
       #   없음 → build → scan → push
@@ -140,16 +115,11 @@ jobs:
             echo "found=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # ── 멱등성: 같은 커밋 rerun 대비 (P1-4) ───────────────
-      # IMMUTABLE 리포지토리라 같은 태그 재푸시는 거부된다.
-      # 같은 커밋을 rerun 하면 태그가 동일하므로 push 에서 실패한다.
-      # → immutable 정책을 푸는 대신, 이미 있으면 빌드·푸시를 건너뛰고
-      #   기존 digest 를 재사용해 배포만 다시 수행한다.
       - name: Set up Buildx
         if: steps.exists.outputs.found == 'false'
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
 
-      # ── 베이스 이미지 인증 pull (3단계 파트 2 보완, 2026-10-18) ──
+      # 베이스 이미지 인증 pull
       # 베이스(public.ecr.aws)를 익명으로 받으면 무료 데이터 한도가 계정에 묶이지 않는다.
       # GitHub 러너는 IP 를 다른 사용자와 공유하므로, 남이 한도를 쓰면 우리 빌드가
       # "toomanyrequests: Data limit exceeded" 로 막힌다 (#84 머지 빌드에서 실제 발생).
@@ -160,7 +130,7 @@ jobs:
         if: steps.exists.outputs.found == 'false'
         run: aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
 
-      # --provenance/--sbom false (트러블슈팅 #18):
+      # --provenance/--sbom false:
       #   buildx 기본 attestation 은 태그를 Image Index 에 붙이는데 Inspector 가
       #   인덱스를 스캔하지 못해(UNSUPPORTED_MEDIA_TYPE) "스캔은 됐는데 태그별
       #   결과가 안 보이는" 상태가 된다. SBOM 은 아래에서 digest 기준 별도 생성.
@@ -170,7 +140,7 @@ jobs:
         with:
           context: images/s5-${{ steps.tag.outputs.variant }}
           platforms: linux/amd64
-          # 빌드 identity 를 이미지에 굽는다 (P1-6) —
+          # 빌드 identity 를 이미지에 굽는다 —
           # 페이지에 커밋 SHA 가 나타나 commit→image→pod→HTTPS 가 눈으로 연결된다
           build-args: |
             BUILD_SHA=${{ github.sha }}
@@ -180,15 +150,11 @@ jobs:
           load: true
           tags: ${{ steps.repo.outputs.url }}:${{ steps.tag.outputs.value }}
 
-      # ── ★ 빌드타임 게이트 (BREAK 축) ──────────────────────
-      # S5 에서 이 게이트가 실제 CVE(CVE-2026-14456)를 잡아 차단했다.
-      # CI 에서도 막는지가 "절차를 그대로 자동화했다"의 증명.
+      # ★ 빌드타임 게이트
       # 실패 시 워크플로 중단 → 푸시·배포 단계에 도달하지 않음.
       #
       # ⚠ trivy-action 은 2026.3 태그 오염 사건의 당사자다(버전 태그 76개가
       #   악성 커밋으로 force-push 됨). 태그가 아니라 커밋 SHA 로 핀한다.
-      #   현재 workflow는 검증된 release commit SHA 로 이미 고정돼 있으며,
-      #   Dependabot PR을 통해 새 release SHA를 추적한다.
       - name: Trivy vulnerability gate
         if: steps.exists.outputs.found == 'false'
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # 0.35.0
@@ -219,7 +185,7 @@ jobs:
             --query "imageDetails[0].imageDigest" --output text)
           {
             echo "value=${DIGEST}"
-            # [3단계 파트 2] 롤아웃도 tag@digest — 05 의 기준 이미지와 같은 형식
+            # 롤아웃도 tag@digest — 05 의 기준 이미지와 같은 형식
             echo "uri=${{ steps.repo.outputs.url }}:${{ steps.tag.outputs.value }}@${DIGEST}"
           } >> "$GITHUB_OUTPUT"
 
@@ -248,9 +214,6 @@ jobs:
       # ⚠ SBOM 을 OCI attestation 으로 붙이지 않는다 — S7 의 주제다.
       #   S6: 생성 + 보존 + digest 결합 / S7: 서명·attestation·admission 검증
 
-  # ══════════════════════════════════════════════════════════
-  # S6-B — 배포   (VPC 내부 ephemeral 러너, EKS 프라이빗 경로)
-  # ══════════════════════════════════════════════════════════
   deploy:
     name: Deploy to EKS
     needs: build
@@ -282,7 +245,7 @@ jobs:
       - name: Update kubeconfig
         run: aws eks update-kubeconfig --region "$AWS_REGION" --name joshua-eks
 
-      # ── ★ RBAC 실증 (P1-7) — 실제 CI 신원으로 ────────────
+      # ★ RBAC 실증 — 실제 CI 신원으로
       # `--as-group` 임퍼소네이션은 "그룹에 무엇이 바인딩됐나"만 본다.
       # 여기서는 **실제로 수임된 신원**(GitHub OIDC → gha-deploy-role →
       # EKS access entry → ci-deployer 그룹 → RoleBinding)으로 검사하므로
@@ -290,8 +253,6 @@ jobs:
       # 모든 결과를 수집한 뒤 하나라도 기대와 다르면 마지막에 실패(fail-final)한다.
       - name: Verify least privilege (positive / negative)
         run: |
-          # fail-fast는 피하되 fail-final로 동작한다.
-          # 모든 positive/negative 결과를 끝까지 수집한 뒤 하나라도 예상과 다르면 실패.
           failures=0
           check() {  # $1=expected(yes|no), $2..=kubectl auth can-i args
             local want="$1"; shift
@@ -313,7 +274,7 @@ jobs:
           check no  get secrets -n kube-system
           check no  delete networkpolicies -n app
           check no  create pods/exec -n app
-          # default 의 실증 데모는 CI 권한 밖 (3단계 파트 2 — CI Role 은 app 에만 있다)
+          # default 의 실증 데모는 CI 권한 밖 — CI Role 은 app 에만 있다
           check no  patch deployment/netpol-client -n default
 
           if [ "$failures" -ne 0 ]; then
@@ -330,8 +291,8 @@ jobs:
           echo "image=${CURRENT}" >> "$GITHUB_OUTPUT"
           echo "배포 전: ${CURRENT}"
 
-      # ── 롤아웃 — image 필드 하나만 변경 ───────────────────
-      # Terraform 은 이 필드를 ignore_changes 로 위임했으므로(D42) drift 가 아니다.
+      # 롤아웃 — image 필드 하나만 변경
+      # Terraform 은 이 필드를 ignore_changes 로 위임했으므로 drift 가 아니다.
       # 다른 필드(replica·probe·볼륨)는 Terraform 이 계속 소유한다.
       # RBAC 상 이 Deployment 의 patch 만 가능 — 다른 객체는 손댈 수 없다.
       - name: Roll out image

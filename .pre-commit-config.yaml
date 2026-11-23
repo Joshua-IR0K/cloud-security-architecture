@@ -1,4 +1,3 @@
-# .pre-commit-config.yaml — 커밋 전 자동 검사 훅
 repos:
   # gitleaks — 시크릿 탐지 (커밋에 시크릿 포함 시 차단)
   - repo: https://github.com/gitleaks/gitleaks

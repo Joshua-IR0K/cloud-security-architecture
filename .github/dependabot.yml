@@ -1,20 +1,5 @@
-# ============================================================
-# .github/dependabot.yml — 의존성 자동 업데이트 (공급망 보안)
-# ============================================================
-#
-# Terraform 레포에서 Dependabot이 하는 일:
-#   1. GitHub Actions 버전 추적 (actions/checkout 등이
-#      구버전·취약 버전이 되면 업데이트 PR 자동 생성)
-#   2. Terraform Provider 버전 추적 (aws provider 등)
-#   3. 컨테이너 베이스 이미지 추적 (images/s5-good 의 FROM tag@digest — 3단계)
-#
-# 업데이트 PR도 우리 CI(plan + checkov)를 통과해야 머지
-# → 의존성 업데이트조차 검증 게이트를 거치는 구조
-# ============================================================
-
 version: 2
 updates:
-  # GitHub Actions 의존성 (워크플로우의 uses: 액션들)
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -25,7 +10,7 @@ updates:
 
   # Terraform Provider 의존성 (스택별)
   #
-  # [3단계 파트 4] 프로바이더 메이저 업그레이드(예: aws 5 → 6)는 리소스 문법·state 변경을 동반한다
+  # 프로바이더 메이저 업그레이드(예: aws 5 → 6)는 리소스 문법·state 변경을 동반한다
   #   → 자동 PR 로 받지 않고 사람이 계획해서 올린다.
   # ⚠ update-types(semver-major) 로는 막히지 않는다 — 2026-10-18 실제 확인 (규칙 머지 직후 aws ~> 6.69 PR 재생성):
   #   Dependabot 은 "~> 5.0" 같은 범위 제약이면 "현재 버전"을 .terraform.lock.hcl 에서 읽는데,
@@ -67,7 +52,7 @@ updates:
       - dependency-name: "hashicorp/kubernetes"
         versions: [">= 3.3.0"]
 
-  # 컨테이너 베이스 이미지 (3단계) — 서비스 이미지만
+  # 컨테이너 베이스 이미지 — 서비스 이미지만
   #   Dockerfile 의 FROM tag@digest 를 함께 올리는 PR 을 만든다 → 머지 후 CI 의 Trivy 게이트가 검증.
   #   업스트림이 매주 같은 태그를 재빌드하므로 digest 만 바뀌는 PR 이 주기적으로 오는 게 정상이다.
   #   images/s5-vuln 은 "의도적으로 낡은" 스캐너 대조군(S5)이라 대상에서 뺀다.

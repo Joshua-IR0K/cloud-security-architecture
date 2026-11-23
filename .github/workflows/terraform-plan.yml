@@ -1,25 +1,7 @@
-# ============================================================
-# .github/workflows/terraform-plan.yml
-# ============================================================
-# main 으로 향하는 PR 에서 영속 스택(01·02)의 terraform plan 을 실행한다.
-# OIDC 로 임시 자격증명 획득 (장기 키 없음). apply 는 로컬에서 수동.
-#
-# [A-1, 2026-10] plan 신원 최소권한 — 멘토 피드백 ②
-#   · plan 대상: 01-network · 02-security 만
-#       03 제외 — 03 state 에 Okta 시크릿·X-Origin-Verify 가 저장돼 있어 03 을 plan 하는
-#       순간 CI 신원이 시크릿을 읽게 된다. 03 은 매 사이클 지우는 임시 스택이므로
-#       plan 은 로컬에서만 한다 (04·05 를 뺀 D14 와 같은 원칙).
-#   · Least privilege guard: CI 신원으로 허용 3 / 거부 11 을 실제로 시도한다.
-#       통제는 IAM 정책(00, 로컬 apply)이고, 가드는 그 통제가 다시 넓어지는 것을
-#       PR 에서 바로 잡아내는 회귀 탐지다. 가드를 지워도 통제는 남는다.
-#   · plan 실패 = 잡 실패: 이전엔 continue-on-error 때문에 plan 이 실패해도 체크가
-#       초록이었다. 이제 체크 색이 곧 plan 결과다.
-#   · -lock=false: CI plan 은 참고용 읽기 전용이다. 잠금 테이블에 쓰지 않는다 (A1 문서 §5).
-#   · 모든 액션을 커밋 SHA 로 고정 (Dependabot 이 갱신 PR 을 올린다).
-#   · paths 필터 제거: 모든 PR 에서 가드가 돌아 경계를 상시 확인한다.
-#
-# 사전 준비: Repository Variables — AWS_ROLE_ARN(plan 역할), DOMAIN_NAME
-# ============================================================
+# guard 잡: CI 신원으로 허용·거부 호출을 실제로 시도한다.
+#   통제는 IAM 정책(00, 로컬 apply)이고, 가드는 그 통제가 다시 넓어지는 것을
+#   PR 에서 바로 잡아내는 회귀 탐지다. 가드를 지워도 통제는 남는다.
+# paths 필터를 두지 않는다: 모든 PR 에서 가드가 돌아 경계를 상시 확인한다.
 
 name: Terraform Plan
 
@@ -27,7 +9,6 @@ on:
   pull_request:
     branches: [main]
 
-# ★ OIDC 토큰 발급에 필수
 permissions:
   id-token: write       # OIDC 토큰 수신
   contents: read        # 레포 체크아웃
@@ -40,7 +21,7 @@ env:
   TF_VAR_domain_name: ${{ vars.DOMAIN_NAME }}
 
 jobs:
-  # ── CI 신원의 권한 경계를 실제 호출로 확인 ─────────────────
+  # CI 신원의 권한 경계를 실제 호출로 확인
   guard:
     name: Least privilege guard
     # ubuntu-latest 는 2026-10-19 부터 Ubuntu 26 으로 바뀐다 — 실행 환경이 조용히 바뀌지 않게 버전을 고정한다
@@ -55,10 +36,10 @@ jobs:
 
       # 거부 12 = state·시크릿 경로 8 + 감사 기록 내용 3 + 잠금 쓰기 1
       #   state·시크릿: 03·05 state · 03 목록 · Okta 시크릿 · CloudFront 설정 2 · ALB 규칙 · WAF 조회
-      #   감사 기록: EKS 감사 로그 읽기 · Logs Insights 쿼리 실행 (멘토 ⑤) · Athena 로그 조회 (멘토 ③)
+      #   감사 기록: EKS 감사 로그 읽기 · Logs Insights 쿼리 실행 · Athena 로그 조회
       # ⚠ S3 거부(03·05 state)는 403 으로 판정한다. ListBucket 이 없으면 객체가 없어도
       #   403 이 오므로, 이 가드는 "객체가 존재할 때" 의미가 있다(destroy 후에도 state
-      #   객체는 남는다). 객체 존재와 무관한 증명은 정책 시뮬레이터로 했다 (A1 문서 §7).
+      #   객체는 남는다). 객체 존재와 무관한 증명은 정책 시뮬레이터로 했다.
       - name: Verify plan role boundary (allow 3 / deny 12)
         run: |
           set -uo pipefail
@@ -161,7 +142,7 @@ jobs:
           fi
           echo "== 허용 3 / 거부 12 — 경계 확인 완료 =="
 
-  # ── 영속 스택 plan ─────────────────────────────────────────
+  # 영속 스택 plan
   plan:
     name: Plan ${{ matrix.stack }}
     needs: guard
@@ -178,11 +159,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
-      # ★ OIDC 로 AWS 임시 자격증명 획득 (장기 키 없음)
       - name: Configure AWS Credentials (OIDC, plan role)
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a  # v4.3.1
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}  # Repository Variable 참조
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-plan-${{ matrix.stack }}
 
@@ -200,14 +180,13 @@ jobs:
         run: terraform validate
 
       # -lock=false: CI plan 은 참고용 읽기 전용 → 잠금 테이블에 쓰지 않는다.
-      #   plan 시점 state 가 최신이라는 보장은 하지 않는다 (A1 문서 §5 의 4가지 조건).
+      #   plan 시점 state 가 최신이라는 보장은 하지 않는다.
       - name: Terraform Plan
         id: plan
         working-directory: ${{ matrix.stack }}
         run: terraform plan -input=false -no-color -lock=false
         continue-on-error: true  # 결과 코멘트는 남기고, 마지막 스텝에서 잡을 실패시킨다
 
-      # plan 결과를 PR 코멘트로 게시
       - name: Comment Plan Result
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7.1.0
         if: github.event_name == 'pull_request'
