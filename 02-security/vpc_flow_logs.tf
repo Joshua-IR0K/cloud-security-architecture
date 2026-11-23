@@ -1,9 +1,3 @@
-# ============================================================
-# 02-security/vpc_flow_logs.tf — VPC Flow Logs (S3 직접 저장)
-# ============================================================
-# 01-network 스택의 VPC ID를 SSM에서 읽어서 Flow Logs 설정
-# ============================================================
-
 locals {
   flow_log_format = join(" ", [
     "$${version}", "$${account-id}", "$${interface-id}",
@@ -18,7 +12,7 @@ locals {
 }
 
 resource "aws_flow_log" "vpc_s3" {
-  vpc_id               = local.vpc_id # ← SSM에서 읽은 VPC ID
+  vpc_id               = local.vpc_id
   traffic_type         = "ALL"
   log_destination_type = "s3"
   log_destination      = aws_s3_bucket.flow_logs.arn
@@ -47,7 +41,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "flow_logs" {
   rule {
     apply_server_side_encryption_by_default {
       sse_algorithm     = "aws:kms"
-      kms_master_key_id = aws_kms_key.logs.arn # Phase 4A.5: 전용 CMK
+      kms_master_key_id = aws_kms_key.logs.arn
     }
     bucket_key_enabled = true # S3 Bucket Key로 KMS 호출 비용 절감
   }

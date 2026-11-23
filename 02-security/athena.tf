@@ -1,7 +1,3 @@
-# ============================================================
-# 02-security/athena.tf — 보안 로그 조사 계층 (멘토 ③)
-# ============================================================
-#
 # 왜 필요한가 — 로그는 쌓이는데 조사 수단이 코드에 없었다
 #   CloudTrail · VPC Flow Logs · WAF 로그를 S3 에 쌓고 있지만 조회 환경이 코드로
 #   관리되지 않아, 같은 조사를 다시 하거나 남에게 보여줄 수 없었다.
@@ -19,8 +15,7 @@
 #
 # ⚠ CI plan 역할 (00): 이 파일의 리소스를 refresh 할 권한이 함께 필요하다.
 #   특히 결과 버킷은 s3:ListBucket 목록에 넣어야 한다 — 빠지면 CI plan 이 버킷을
-#   "없음"으로 보고 재생성을 계획한다 (A-1 에서 실제로 겪은 조용한 오판).
-# ============================================================
+#   "없음"으로 보고 재생성을 계획한다 (실제로 겪은 조용한 오판).
 
 data "aws_regions" "athena_trail" {} # 계정에서 활성화된 리전 = 멀티 리전 trail 이 로그를 남기는 범위
 
@@ -38,7 +33,6 @@ locals {
   athena_waf_acl_name = "${var.project_name}-waf-acl"
 }
 
-# ── 결과 버킷 ─────────────────────────────────────────────────
 resource "aws_s3_bucket" "athena_results" {
   #checkov:skip=CKV_AWS_18:쿼리 결과 임시 버킷(7일 만료) — 접근 기록은 CloudTrail 의 Athena API 이벤트로 충분
   #checkov:skip=CKV_AWS_144:7일 후 사라지는 재생성 가능한 산출물 — 리전 간 복제 불필요
@@ -112,7 +106,6 @@ resource "aws_s3_bucket_policy" "athena_results" {
   depends_on = [aws_s3_bucket_public_access_block.athena_results]
 }
 
-# ── 워크그룹 ──────────────────────────────────────────────────
 resource "aws_athena_workgroup" "security" {
   name        = local.athena_workgroup
   description = "Security log investigation - encrypted results, 1GB scan cap enforced"
@@ -140,7 +133,6 @@ resource "aws_athena_workgroup" "security" {
   }
 }
 
-# ── 카탈로그 ──────────────────────────────────────────────────
 resource "aws_glue_catalog_database" "security_logs" {
   name        = "security_logs"
   description = "Security log tables (partition projection, no crawler)"
@@ -388,7 +380,7 @@ resource "aws_glue_catalog_table" "waf_logs" {
   }
 }
 
-# ── 저장 쿼리 5개 — 조사 절차를 코드로 ─────────────────────────
+# 저장 쿼리 5개 — 조사 절차를 코드로
 # 콘솔: 워크그룹을 이 워크그룹으로 바꾸고 Saved queries 에서 연다. Run 을 누르면 ? 마다 값을 묻는다.
 #   문자열은 작은따옴표로 감싼다 (예: '2026/10/06'). 파티션 값은 모두 UTC 기준.
 #   테이블은 DB 이름까지 적는다 (security_logs.<table>) — 콘솔 편집기는 왼쪽 패널의 Database

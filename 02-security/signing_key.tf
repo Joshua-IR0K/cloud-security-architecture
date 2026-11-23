@@ -1,6 +1,4 @@
-# ============================================================
-# 02-security/signing_key.tf — Stage 7 서명 키 (신규)
-# ============================================================
+# 02-security/signing_key.tf — S7 서명 키 (신규)
 # ⚠ images CMK 를 재사용하지 않는다 — 암호화와 서명은 다른 보안 속성이고
 #   KMS 키 사양(key_usage)부터 다르다:
 #     images  : SYMMETRIC_DEFAULT / ENCRYPT_DECRYPT  → ECR at-rest 암호화
@@ -11,7 +9,6 @@
 # ⚠ 비대칭 키는 AWS 자동 회전을 지원하지 않는다 → 공개키가 고정된다.
 #   그래서 Kyverno 정책에 **정적 PEM** 을 넣을 수 있다(런타임 KMS 호출 불필요).
 #   회전이 필요하면 새 키를 만들고 정책의 PEM 을 교체하는 명시적 절차를 밟는다.
-# ============================================================
 
 resource "aws_kms_key" "signing" {
   description              = "${var.project_name} container image signing (cosign)"
@@ -61,7 +58,7 @@ data "aws_ssm_parameter" "github_sign_role_arn" {
   name = "/${var.project_name}/bootstrap/github_sign_role_arn"
 }
 
-# ── 공개키를 05-k8s 로 전달 (Kyverno 정책의 검증 material) ──
+# 공개키를 05-k8s 로 전달 (Kyverno 정책의 검증 material)
 # ★ 이것이 "Kyverno 에 KMS 권한을 주지 않는" 방법이다:
 #   런타임에 kms:Verify 를 호출하는 대신 공개키 PEM 을 정책에 박는다.
 #   ⚠ 단 이것은 **검증 material** 문제만 해결한다 —
@@ -92,9 +89,7 @@ output "signing_key_arn" {
   value       = aws_kms_key.signing.arn
 }
 
-# ============================================================
 # gha-sign 의 ECR 권한 — 서명 "아티팩트 저장"에 필요 (P0)
-# ============================================================
 # ⚠ 판정 정정 기록:
 #   초안은 이 역할에 kms:Sign 만 주고 "서명만 하므로 ECR 불필요"라고 봤다. 틀렸다.
 #   cosign 은 KMS 로 서명값을 만든 뒤 **서명 아티팩트를 레지스트리에 push** 한다.

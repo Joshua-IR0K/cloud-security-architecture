@@ -1,16 +1,12 @@
-# ============================================================
-# 02-security/eks_audit_queries.tf — EKS 감사 로그 저장 쿼리 (Logs Insights)
-# ============================================================
-#
 # 왜 필요한가 — 로그는 쌓이는데 "무엇을 물어볼지"가 코드에 없었다
 #   eks_control_plane_logs.tf 로 감사 로그를 받기 시작했지만, 사고가 났을 때 매번 쿼리를
 #   새로 짜야 한다면 조사는 사람의 기억에 의존한다. 조사 절차 자체를 코드로 남긴다
 #   (athena.tf 의 저장 쿼리와 같은 원칙 — CloudTrail·Flow Logs·WAF 는 Athena, EKS 감사는 Logs Insights).
 #
-# 쿼리 2개 — 3단계 하드닝이 막는 두 경로를 그대로 추적한다
+# 쿼리 2개 — PSA 와 CI RBAC 이 막는 두 경로를 그대로 추적한다
 #   01 app 네임스페이스의 PSA 위반·거부
 #      누가 restricted 를 어기는 파드 스펙을 넣었나(audit-violations), 무엇이 거부됐나(403).
-#      G6 시나리오(CI 신원으로 hostNetwork 를 넣는 patch)가 남기는 흔적:
+#      CI 신원으로 hostNetwork 를 넣는 patch 가 남기는 흔적:
 #        ① Deployment patch — 허용되지만 audit-violations 주석이 붙는다 (요청자 = 시도한 신원)
 #        ② 파드 생성 — replicaset-controller 의 요청이 PSA enforce 에 403 으로 거부된다
 #      impersonatedUser 를 함께 본다 — 세션의 실증은 관리자가 CI 그룹을 가장(--as-group)해 수행한다.
@@ -30,7 +26,6 @@
 #   쿼리를 실행하는 것은 사람(관리자)이다. CI plan 역할은 정의 조회(logs:DescribeQueryDefinitions)만
 #   갖고, 실행(logs:StartQuery)은 없다 — 감사 로그 내용을 읽는 경로라서. plan 워크플로의 가드가 확인한다.
 #   실행 비용은 스캔한 데이터 양만큼이다 (14일 보존·실습 규모라 미미).
-# ============================================================
 
 locals {
   eks_audit_queries = {

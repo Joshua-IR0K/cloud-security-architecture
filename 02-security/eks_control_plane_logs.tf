@@ -1,6 +1,4 @@
-# ============================================================
 # 02-security/eks_control_plane_logs.tf — EKS 컨트롤 플레인 로그 그룹 (멘토 ⑤)
-# ============================================================
 #
 # 왜 필요한가 — 탐지는 있는데 조사할 원본이 없었다
 #   GuardDuty EKS Protection 은 audit 스트림을 직접 읽어 "탐지"는 한다.
@@ -23,7 +21,6 @@
 #   audit         누가 어떤 쿠버네티스 API 를 불렀나 (조사의 핵심)
 #   authenticator 어떤 IAM 신원이 어떤 쿠버네티스 사용자로 매핑됐나
 #   api · controllerManager · scheduler 는 운영 디버깅용이라 비용 대비 가치가 낮아 제외
-# ============================================================
 
 variable "eks_cluster_name" {
   description = "04-eks 의 클러스터 이름. 로그 그룹 이름(/aws/eks/<name>/cluster)이 이 값에 고정된다 — 04 의 var.cluster_name 과 같아야 한다"

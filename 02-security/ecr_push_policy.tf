@@ -1,18 +1,9 @@
-# ============================================================
-# 02-security/ecr_push_policy.tf — S6-A (신규)
-# ============================================================
-# S5 에서 "정책은 만들되 attach 는 하지 않는다"고 미뤄둔 그 정책이다.
-#   S5: GitHub 이 아직 push 하지 않으므로 권한을 열지 않음
-#   S6-A: CI 가 실제로 push 하므로 이제 attach
-#   → 최소권한의 "시간축" — 사용하지 않는 권한을 한 스테이지 먼저 열지 않는다.
-#
 # 소유권 배치:
 #   역할 자체        → 00-bootstrap (OIDC provider 와 한 몸)
 #   ECR push 정책    → 02-security  (ECR 소유 스택이 그 권한을 정의)
 #   역할 ARN 전달    → SSM (/bootstrap/github_build_role_arn)
 #   ⚠ 참조 방향: 02(상위) → 00(토대) 읽기. 토대가 상위를 참조하지 않으므로
 #     방향 원칙 위반이 아니다.
-# ============================================================
 
 data "aws_ssm_parameter" "github_build_role_arn" {
   name = "/${var.project_name}/bootstrap/github_build_role_arn"
@@ -32,7 +23,7 @@ data "aws_iam_policy_document" "ecr_push" {
 
   # ② 실제 push — 이 리포지토리 "하나"로 핀포인트
   #    계정의 다른 ECR 리포지토리에는 쓸 수 없다.
-  #    (LB Controller 정책을 TG ARN 하나로 좁힌 D13 과 같은 철학)
+  #    (LB Controller 정책을 TG ARN 하나로 좁힌 것과 같은 철학)
   statement {
     sid    = "PushToAppRepositoryOnly"
     effect = "Allow"
@@ -54,7 +45,7 @@ data "aws_iam_policy_document" "ecr_push" {
     resources = [aws_ecr_repository.app.arn]
   }
 
-  # ③ SSM — ECR 리포지토리 URL 조회 (P0 추가)
+  # ③ SSM — ECR 리포지토리 URL 조회
   #   워크플로가 OIDC 수임 직후 이 파라미터를 읽어 리포지토리 URL 을 얻는다.
   #   이 권한이 없으면 "Resolve ECR repository" 스텝에서 AccessDenied 로
   #   **docker build 에 도달하기도 전에** 실패한다.
@@ -67,7 +58,6 @@ data "aws_iam_policy_document" "ecr_push" {
   }
 
   # ④ ECR Public 인증 토큰 — 베이스 이미지(public.ecr.aws)를 "인증된 pull" 로 받는다
-  #    (3단계 파트 2 보완, 2026-10-18)
   #    익명 pull 의 무료 데이터 한도(월 500GB)는 계정에 묶이지 않는다. GitHub 호스티드 러너는
   #    IP 를 다른 사용자와 공유하므로, 남이 한도를 쓰면 우리 빌드가 베이스 pull 에서
   #    "toomanyrequests: Data limit exceeded" 로 막힌다 (#84 머지 빌드에서 실제 발생).
@@ -81,7 +71,7 @@ data "aws_iam_policy_document" "ecr_push" {
     resources = ["*"]
   }
 
-  # ⚠ KMS 권한을 두지 않는다 (판정 번복 기록):
+  # ⚠ KMS 권한을 두지 않는다:
   #   초안은 "ecr:PutImage(데이터) + kms:GenerateDataKey(키)의 이중 관문"이라는
   #   S4(Secrets Manager) 모델을 그대로 이식했으나 **ECR 은 다르다.**
   #   customer-managed key 로 암호화된 리포지토리는 생성 시 ECR 이 KMS grant 를
@@ -93,7 +83,7 @@ data "aws_iam_policy_document" "ecr_push" {
   #   교훈: 보안 패턴을 서비스 간에 일반화하기 전에 그 서비스의 KMS 통합 모델을
   #   확인해야 한다. 우리 프로젝트만 봐도 두 모델이 공존한다 —
   #     호출자가 키 권한 보유 : Secrets Manager (S4)
-  #     서비스가 grant 로 대행 : ECR (여기), EBS (ASG SLR, 게이트 #1)
+  #     서비스가 grant 로 대행 : ECR (여기), EBS (ASG SLR)
 
   # 의도적 부재:
   #   ecr:CreateRepository / DeleteRepository / SetRepositoryPolicy

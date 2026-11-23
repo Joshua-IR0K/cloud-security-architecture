@@ -1,7 +1,3 @@
-# ============================================================
-# 02-security/outputs.tf
-# ============================================================
-
 output "cloudtrail_s3_bucket" {
   description = "CloudTrail 로그 S3 버킷"
   value       = aws_s3_bucket.cloudtrail.bucket

@@ -1,6 +1,4 @@
-# ============================================================
-# 02-security/inspector_gate_policy.tf — Stage 7 CLOSE (G7)
-# ============================================================
+# 02-security/inspector_gate_policy.tf — S7 CLOSE (G7)
 # 워크플로의 ⑥ Inspector gate 가 build 역할로 스캔 상태와 finding 을 읽는다.
 # 이 권한이 없으면 게이트가 AccessDenied 로 실패한다 —
 # S6 의 ssm:GetParameter 누락(#Work log)과 같은 계열의 "작업을 하려면 무엇에
@@ -11,7 +9,6 @@
 #
 # ⚠ inspector2 의 List* API 는 리소스 수준 제한을 지원하지 않아 resources="*" 다.
 #   대신 워크플로가 ecrRepositoryName · ecrImageHash 필터로 범위를 좁힌다.
-# ============================================================
 
 data "aws_iam_policy_document" "inspector_gate_read" {
   statement {

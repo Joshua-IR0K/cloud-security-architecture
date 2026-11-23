@@ -1,29 +1,11 @@
-# ============================================================
-# 02-security/kms.tf — KMS Customer Managed Keys (용도별 분리)
-# ============================================================
-#
-# 키를 용도별로 분리하는 이유 (멘토 원칙):
-#   - Blast Radius 최소화: 한 키가 손상돼도 다른 용도는 안전
-#   - 권한 분리: 로그 암호화 키와 시크릿 암호화 키의 접근 주체가 다름
-#   - 감사 추적: CloudTrail에서 "어떤 용도의 키가 사용되었나" 구분 가능
-#
-# 키를 영속 보안 스택(02)에 두는 이유:
-#   - Crypto-shredding 방지: 키가 삭제되면 그 키로 암호화된 데이터를
-#     영구히 복호화 불가. 워크로드 destroy로 키가 날아가면 안 됨.
-#
 # Key Policy 설계 원칙:
 #   - 모든 키에 "Root 위임" 기본 적용 → IAM Policy로 세부 권한 관리 가능
-#     (회사 출입증 비유: 문지기가 "인사팀 권한 등급을 믿겠다"고 선언)
 #   - AWS 서비스(CloudTrail, Config 등)는 Key Policy에 직접 명시
 #     (KMS는 Key Policy가 최상위 — 여기 없으면 IAM으로도 못 씀)
-#
-# ============================================================
 
 data "aws_region" "current" {}
 
-# ============================================================
 # 키 ①: 로그 암호화 키 (S3 로그 버킷용)
-# ============================================================
 # 용도: CloudTrail, Config, VPC Flow Logs, WAF Logs의 S3 암호화
 #       + EKS 컨트롤 플레인 로그 그룹 (CloudWatch Logs, eks_control_plane_logs.tf)
 resource "aws_kms_key" "logs" {
@@ -99,7 +81,7 @@ resource "aws_kms_key" "logs" {
         Resource = "*"
       },
       {
-        # EKS 컨트롤 플레인 로그 그룹 (CloudWatch Logs) — 멘토 ⑤
+        # EKS 컨트롤 플레인 로그 그룹 (CloudWatch Logs)
         # CloudWatch Logs 는 리전 서비스 주체(logs.<region>)로 키를 쓴다.
         # 암호화 컨텍스트(aws:logs:arn)로 이 로그 그룹 하나에만 한정 —
         # 같은 계정의 다른 로그 그룹이 이 키를 가져다 쓰지 못한다.
@@ -136,9 +118,7 @@ resource "aws_kms_alias" "logs" {
   target_key_id = aws_kms_key.logs.key_id
 }
 
-# ============================================================
 # 키 ②: 시크릿 암호화 키 (Secrets Manager용)
-# ============================================================
 # 용도: Secrets Manager에 저장되는 Okta 자격증명 등 암호화
 resource "aws_kms_key" "secrets" {
   description             = "${var.project_name} - Secrets Manager encryption"
@@ -192,10 +172,8 @@ resource "aws_kms_alias" "secrets" {
   target_key_id = aws_kms_key.secrets.key_id
 }
 
-# ============================================================
 # 키 ③: EBS 볼륨 암호화 키 (EC2/EKS 워크로드용)
-# ============================================================
-# 용도: EC2 인스턴스의 EBS 볼륨 암호화 (Phase 4B에서 EKS 노드도)
+# 용도: EC2 인스턴스의 EBS 볼륨 암호화 (EKS 노드 포함)
 resource "aws_kms_key" "ebs" {
   description             = "${var.project_name} - EBS volume encryption"
   deletion_window_in_days = 7
@@ -235,7 +213,7 @@ resource "aws_kms_key" "ebs" {
         }
       },
       {
-        # ── Phase 4B: EKS 노드그룹 EBS 암호화 (게이트 #1) ──
+        # EKS 노드그룹 EBS 암호화
         # 노드 인스턴스를 실제로 띄우는 주체는 EKS 가 아니라 AWS 관리 ASG.
         # SLR 은 AWS 관리 정책이 불변이라 IAM 정책 부착이 불가 →
         # 키 정책에 Principal 로 직접 명시하는 것이 유일한 인가 경로.

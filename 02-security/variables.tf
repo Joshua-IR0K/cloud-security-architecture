@@ -1,7 +1,3 @@
-# ============================================================
-# 02-security/variables.tf
-# ============================================================
-
 variable "aws_region" {
   description = "AWS 리전"
   type        = string
@@ -26,9 +22,7 @@ variable "alert_email" {
   default     = "zeroone2930@joshua-devsecops.com"
 }
 
-# ============================================================
-# Stage 6 — CodeBuild-hosted GitHub Actions Runner
-# ============================================================
+# S6 — CodeBuild-hosted GitHub Actions Runner
 #
 # ⚠ `codebuild_runner_enabled` 게이트 제거 (2026-09)
 #
@@ -66,4 +60,3 @@ variable "github_connection_arn" {
   type        = string
   default     = "arn:aws:codeconnections:ap-northeast-2:364652779867:connection/0381f302-74a9-4211-9bae-35fce5261c8c"
 }
-
