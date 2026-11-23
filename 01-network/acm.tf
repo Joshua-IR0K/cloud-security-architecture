@@ -1,12 +1,4 @@
-# 03(세션)이 아니라 01(영속)에 두는 이유:
-#   1. ACM 퍼블릭 인증서는 무료 → "01-network는 무료 리소스만" 원칙 부합
-#   2. workload destroy마다 인증서 삭제 → 재apply 시 재발급 + DNS 검증
-#      대기(2~5분 × 2장)가 반복되던 마찰 제거
-#   3. 참조 방향 건전: CloudFront/ALB(임시) → 인증서(영속) = 임시→영속 OK
-#      사용처가 destroy돼도 인증서는 "미사용" 상태로 남을 뿐 무해
-#
-# 검증 방식: DNS 검증 (자동 갱신 지원)
-#   Hosted Zone은 도메인 등록 시 자동 생성된 영속 자산 → data로 참조만
+# 영속 스택에 둔다 — 세션 스택(03)에 두면 destroy·apply 때마다 재발급과 DNS 검증 대기가 반복된다.
 
 data "aws_route53_zone" "main" {
   name         = var.domain_name
@@ -19,7 +11,6 @@ resource "aws_acm_certificate" "cloudfront" {
   domain_name       = var.domain_name
   validation_method = "DNS"
 
-  # 와일드카드 SAN — www 서브도메인 커버 (단일 인증서로 루트+www)
   subject_alternative_names = ["*.${var.domain_name}"]
 
   lifecycle {
@@ -46,8 +37,7 @@ resource "aws_acm_certificate" "alb" {
   }
 }
 
-# ACM DNS 검증 레코드
-# 두 인증서의 검증 레코드를 병합 (같은 도메인 → 동일 레코드, 중복 제거)
+# 두 인증서가 같은 도메인이라 검증 레코드가 겹친다 — 합쳐서 한 번만 만든다.
 locals {
   cert_validation_options = merge(
     {

@@ -5,8 +5,7 @@ resource "aws_subnet" "public" {
   cidr_block        = var.public_subnet_cidrs[count.index]
   availability_zone = var.availability_zones[count.index]
 
-  # Public Subnet이라고 해서 자동으로 Public IP를 할당할 필요 없음
-  # ALB는 자체적으로 ENI를 생성하고, NAT GW도 EIP를 별도 할당받음
+  # 퍼블릭 서브넷이어도 자동 공인 IP는 주지 않으며, ALB는 자체 ENI, NAT는 EIP 를 사용
   map_public_ip_on_launch = false
 
   tags = {

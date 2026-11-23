@@ -22,7 +22,7 @@ resource "aws_ssm_parameter" "private_subnet_ids" {
   tags = { Name = "${var.project_name}-private-subnet-ids" }
 }
 
-# Private Route Table ID (워크로드가 NAT 라우팅 추가 시 필요)
+# 03 이 NAT 경로를 추가할 라우트 테이블
 resource "aws_ssm_parameter" "private_route_table_id" {
   name  = "/${var.project_name}/network/private_route_table_id"
   type  = "String"
@@ -47,7 +47,7 @@ resource "aws_ssm_parameter" "app_sg_id" {
   tags = { Name = "${var.project_name}-app-sg-id" }
 }
 
-# First Public Subnet ID (NAT GW 배치용)
+# 03 이 NAT 게이트웨이를 놓을 서브넷
 resource "aws_ssm_parameter" "first_public_subnet_id" {
   name  = "/${var.project_name}/network/first_public_subnet_id"
   type  = "String"
@@ -56,8 +56,7 @@ resource "aws_ssm_parameter" "first_public_subnet_id" {
   tags = { Name = "${var.project_name}-first-public-subnet-id" }
 }
 
-# ACM 인증서 ARN — workload가 참조 (검증 완료 후에만 파라미터 생성되도록
-# validation 리소스의 certificate_arn을 사용)
+# 검증이 끝난 뒤에만 만들어지도록 validation 리소스의 certificate_arn을 사용)
 resource "aws_ssm_parameter" "acm_cloudfront_cert_arn" {
   name  = "/${var.project_name}/network/acm_cloudfront_cert_arn"
   type  = "String"

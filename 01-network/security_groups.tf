@@ -1,4 +1,3 @@
-# CloudFront Managed Prefix List 조회
 data "aws_ec2_managed_prefix_list" "cloudfront" {
   name = "com.amazonaws.global.cloudfront.origin-facing"
 }
@@ -44,12 +43,9 @@ resource "aws_security_group_rule" "alb_to_app" {
   description              = "To App instances on app port"
 }
 
-# ALB Outbound: EKS 파드 포트 (nginx-unprivileged 8080)
-#   ALB egress 는 APP SG 를 향하도록 설계돼 있다. EKS 노드는 APP SG 를 함께 달고 있어
-#   (04 eks.tf vpc_security_group_ids), 파드 IP(노드 ENI 의 보조 IP)로 가는 트래픽도 이 규칙으로 나간다.
-#   ⚠ 이 규칙이 없으면 타깃 등록은 되는데 헬스체크가 Target.Timeout.
-#   80(EC2 경로)과 따로 둔다 — 포트 범위(80-8080)로 묶으면 그 사이 전부가 열린다.
-#   인바운드 쪽은 LB Controller 가 TGB networking.ingress 로 노드 SG 에 같은 포트를 연다(05).
+# ALB → EKS 파드(8080). 노드가 APP SG 를 함께 달고 있어(04 eks.tf) 파드 IP 로 가는 트래픽도 이 규칙을 탄다.
+# 없으면 타깃 등록은 되지만 헬스체크가 Target.Timeout. 80 과 범위로 묶지 않는다 — 사이 포트가 전부 열린다.
+# 노드 SG 쪽 인바운드는 LB Controller 가 TargetGroupBinding 으로 연다 (05 workload.tf).
 resource "aws_security_group_rule" "alb_to_eks_pods" {
   type                     = "egress"
   from_port                = var.eks_pod_port
@@ -60,8 +56,7 @@ resource "aws_security_group_rule" "alb_to_eks_pods" {
   description              = "To EKS pods (nginx-unprivileged) on pod port"
 }
 
-# ALB Outbound: HTTPS → 인터넷 (Okta Token Endpoint 통신에 필요)
-# ALB가 OIDC 인증 시 Okta에 직접 HTTPS 요청을 보내야 함
+# ALB 가 OIDC 인증 중 Okta 토큰 엔드포인트를 직접 호출 (443)
 resource "aws_security_group_rule" "alb_https_out" {
   type              = "egress"
   from_port         = 443
@@ -114,7 +109,7 @@ resource "aws_security_group_rule" "app_http_out" {
 }
 
 resource "aws_security_group" "db" {
-  #checkov:skip=CKV2_AWS_5:Phase 4B RDS/EKS 데이터 계층 대비 예약 — 의도적 선행 정의
+  #checkov:skip=CKV2_AWS_5:데이터 계층용으로 미리 만든 SG — 현재 연결된 리소스 없음
   name        = "${var.project_name}-db-sg"
   description = "DB Security Group - Only App can reach"
   vpc_id      = aws_vpc.main.id

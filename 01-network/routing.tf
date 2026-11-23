@@ -18,9 +18,8 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Private Route Table (NAT GW 라우팅 없음)
-# NAT GW 라우팅은 03-workload 스택에서 aws_route로 추가됨
-# 워크로드 destroy 시 이 라우팅만 삭제되고 RT 자체는 유지
+# 기본 경로(0.0.0.0/0 → NAT)는 03-workload 가 aws_route 로 추가한다.
+# 03 을 지우면 경로만 사라지고 라우트 테이블은 남는다.
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
 
