@@ -1,8 +1,5 @@
 # 실행: Invoke-Expression (terraform output -raw <이름>)
-#
-# 04 소유 AWS 리소스 이름은 "결정론적 재구성"으로 얻는다 —
-# SSM 계약을 늘리지 않기 위함(결정 a: 계약은 cluster_name 하나).
-#   버킷명 = <project>-s2-identity-demo-<account_id>  (04 와 동일 공식)
+# 04에서 만든 리소스 이름은 04와 같은 규칙으로 다시 조립한다. SSM 값을 늘리지 않으려고(예: <project>-s2-identity-demo-<account_id>).
 
 data "aws_caller_identity" "current" {}
 
@@ -85,9 +82,9 @@ output "s3_node_scale" {
   value       = "aws eks update-nodegroup-config --cluster-name ${local.cluster_name} --region ${var.region} --nodegroup-name $(aws eks list-nodegroups --cluster-name ${local.cluster_name} --region ${var.region} --query \"nodegroups[0]\" --output text) --scaling-config minSize=0,maxSize=3,desiredSize=2"
 }
 
-# S4 검증 — 3축 + K8s Secret 미생성
+# 시크릿 데모 확인: 아래 ①~③ + K8s Secret이 안 생겼는지
 
-# ① BREAK: 자격 없는 파드는 기동 자체가 안 됨
+# ① BREAK: 권한 없는 파드는 아예 못 뜬다
 output "s4_verify_denied" {
   description = "①실패가 정답 — ContainerCreating 에서 멈춤 (마운트 실패)"
   value       = "kubectl get pods -l role=s4-denied ; kubectl describe pod -l role=s4-denied | Select-String 'FailedMount|not authorized|Warning'"
@@ -104,7 +101,7 @@ output "s4_verify_content" {
   value       = "kubectl exec deploy/secrets-granted -- cat /mnt/secrets-store/db-username"
 }
 
-# ③ egress 차단 + 시크릿 존재
+# ③ egress는 막혀 있는데 시크릿 파일은 있다
 output "s4_verify_egress_denied" {
   description = <<-EOT
     ★머니샷 — 타임아웃/실패가 정답.
@@ -120,7 +117,7 @@ output "s4_verify_egress_denied" {
   value       = "kubectl exec deploy/secrets-granted -- aws secretsmanager list-secrets --region ${var.region} --cli-connect-timeout 5 --cli-read-timeout 10"
 }
 
-# ④ K8s Secret 미생성 확인 (ESO 대신 CSI 를 고른 근거)
+# ④ K8s Secret이 안 생겼는지 확인
 output "s4_verify_d9_no_k8s_secret" {
   description = <<-EOT
     ④-1 K8s Secret 객체가 생성되지 않았음 = etcd 무노출.
@@ -144,7 +141,7 @@ output "s4_verify_d9_tmpfs" {
   value       = "kubectl exec deploy/secrets-granted -- cat /proc/mounts | Select-String 'secrets-store'"
 }
 
-# 보너스: 키 정책 ViaService 경계 실증
+# 덤: 키 정책 ViaService 조건이 실제로 막는지 확인
 output "s4_verify_viaservice_boundary" {
   description = <<-EOT
     세 번째 관문의 실증 — 역할에 kms:Decrypt 가 "있어도" 직접 호출은 거부된다.
@@ -164,7 +161,7 @@ output "s4_verify_rotation" {
   value       = "kubectl exec deploy/secrets-granted -- sha256sum /mnt/secrets-store/db-password"
 }
 
-# v1 보강 검증 — app 네임스페이스 PSA · 파드 보안
+# v1 보강 확인: app 네임스페이스 PSA, 파드 보안
 
 output "hardening_psa_labels" {
   description = "app 네임스페이스 PSA 라벨 — enforce·audit·warn 모두 restricted, 각 -version 은 v1.35"
@@ -188,7 +185,7 @@ output "hardening_psa_reject" {
   value       = "kubectl -n app run psa-probe --image=public.ecr.aws/docker/library/busybox:stable --restart=Never --dry-run=server -- sleep 1"
 }
 
-# v1 보강 검증 — 가용성 (분산 · PDB)
+# v1 보강 확인: 가용성(분산, PDB)
 
 output "availability_spread" {
   description = <<-EOT
