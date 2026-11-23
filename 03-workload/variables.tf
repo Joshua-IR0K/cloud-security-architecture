@@ -1,7 +1,3 @@
-# ============================================================
-# 03-workload/variables.tf
-# ============================================================
-
 variable "aws_region" {
   description = "AWS 리전"
   type        = string
@@ -42,6 +38,3 @@ variable "domain_name" {
   description = "Route 53 도메인"
   type        = string
 }
-
-# Phase 4A.5: Okta 변수 제거됨
-# → 02-security의 Secrets Manager에서 관리 (data.tf의 local.okta 참조)

@@ -1,7 +1,3 @@
-# ============================================================
-# 03-workload/cloudfront.tf — CloudFront + Custom Domain
-# ============================================================
-
 # X-Origin-Verify 값은 origin_verify.tf 의 2슬롯에서 온다 (무중단 교체 절차 포함)
 
 resource "aws_cloudfront_distribution" "main" {
@@ -16,10 +12,8 @@ resource "aws_cloudfront_distribution" "main" {
   price_class         = "PriceClass_200"
   wait_for_deployment = true
 
-  # Custom Domain
   aliases = [var.domain_name, "www.${var.domain_name}"]
 
-    # WAF 연결
   web_acl_id = aws_wafv2_web_acl.main.arn
 
   origin {
@@ -42,14 +36,13 @@ resource "aws_cloudfront_distribution" "main" {
     }
   }
 
-  # ── Default Cache Behavior ───────────────────────────────
+  # Default Cache Behavior
   default_cache_behavior {
     allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
     cached_methods         = ["GET", "HEAD"]
     target_origin_id       = "alb-origin"
     compress               = true
 
-    # Phase 3: HTTP → HTTPS 자동 리다이렉트
     viewer_protocol_policy = "redirect-to-https"
 
     cache_policy_id          = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
@@ -66,7 +59,7 @@ resource "aws_cloudfront_distribution" "main" {
     }
   }
 
-  # ── Phase 3: ACM 인증서 (us-east-1) ─────────────────────
+  # ACM 인증서 (us-east-1)
   viewer_certificate {
     acm_certificate_arn      = local.cloudfront_cert_arn
     ssl_support_method       = "sni-only"

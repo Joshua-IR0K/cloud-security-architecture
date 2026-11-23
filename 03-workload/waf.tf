@@ -1,10 +1,3 @@
-# ============================================================
-# 03-workload/waf.tf — WAF WebACL (고비용 → 워크로드 스택)
-# ============================================================
-# WAF는 월 $5~10 → 임시 스택에 배치하여 비용 절감
-# 로그 S3 버킷은 02-security에 영속 보관 (destroy 후에도 로그 유지)
-# ============================================================
-
 resource "aws_wafv2_web_acl" "main" {
   provider = aws.us_east_1
 
@@ -187,6 +180,6 @@ resource "aws_wafv2_web_acl" "main" {
 resource "aws_wafv2_web_acl_logging_configuration" "main" {
   provider = aws.us_east_1
 
-  log_destination_configs = [local.waf_log_bucket_arn] # ← SSM 참조
+  log_destination_configs = [local.waf_log_bucket_arn]
   resource_arn            = aws_wafv2_web_acl.main.arn
 }

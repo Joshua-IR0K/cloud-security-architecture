@@ -1,11 +1,3 @@
-# ============================================================
-# 03-workload/alb.tf — ALB + OIDC 인증 (SSM 참조)
-# ============================================================
-# 변경: aws_security_group.alb.id → local.alb_sg_id
-#       aws_subnet.public[*].id → local.public_subnet_ids
-#       aws_vpc.main.id → local.vpc_id
-# ============================================================
-
 resource "aws_lb" "main" {
   #checkov:skip=CKV_AWS_150:삭제 보호 미적용 — workload는 FinOps 원칙상 의도적으로 destroy 가능한 임시 스택
   #checkov:skip=CKV_AWS_91:액세스 로깅 보류 — Datadog SIEM(Phase 4A-3) 수집 대상 설계 시 일괄 결정 (HARDENING_BACKLOG)
@@ -13,8 +5,8 @@ resource "aws_lb" "main" {
   name               = "${var.project_name}-alb"
   internal           = false
   load_balancer_type = "application"
-  security_groups    = [local.alb_sg_id]      # ← SSM 참조
-  subnets            = local.public_subnet_ids # ← SSM 참조
+  security_groups    = [local.alb_sg_id]
+  subnets            = local.public_subnet_ids
 
   enable_deletion_protection = false
 
@@ -31,7 +23,7 @@ resource "aws_lb_target_group" "app" {
   name     = "${var.project_name}-app-tg"
   port     = var.app_port
   protocol = "HTTP"
-  vpc_id   = local.vpc_id                        # ← SSM 참조
+  vpc_id   = local.vpc_id
 
   health_check {
     enabled             = true
@@ -122,9 +114,8 @@ resource "aws_lb_listener_rule" "oidc_auth" {
     }
   }
 
-  # ── Phase 4B B-2: weighted forward (EC2 blue / EKS green 컷오버) ──
-  # 기존 in-place forward → weighted forward. EKS TG 를 weight 0 으로 미리
-  # 넣어두면 빈 TG flip race(502) 원천 차단. 컷오버는 weight 만으로 제어.
+  # weighted forward (EC2 blue / EKS green 컷오버)
+  # EKS TG 를 weight 0 으로 미리 넣어두면 빈 TG 로 flip 되는 race(502)가 원천 차단된다. 컷오버는 weight 만으로 제어.
   # (선행: eks_target_group.tf 의 aws_lb_target_group.eks +
   #        variables_cutover.tf 의 weight 변수 2개)
   action {

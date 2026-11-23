@@ -1,10 +1,3 @@
-# ============================================================
-# 03-workload/ec2.tf — Walking Skeleton EC2 (SSM 참조)
-# ============================================================
-# 변경: aws_subnet.private[0].id → local.private_subnet_ids[0]
-#       aws_security_group.app.id → local.app_sg_id
-# ============================================================
-
 data "aws_ami" "amazon_linux" {
   most_recent = true
   owners      = ["amazon"]
@@ -56,8 +49,8 @@ resource "aws_instance" "web_test" {
   #checkov:skip=CKV_AWS_126:상세 모니터링 미사용 — CloudWatch 비용 절제 원칙 + Phase 4B에서 EKS로 교체될 임시 리소스
   ami                    = data.aws_ami.amazon_linux.id
   instance_type          = var.ec2_instance_type
-  subnet_id              = local.private_subnet_ids[0] # ← SSM 참조
-  vpc_security_group_ids = [local.app_sg_id]           # ← SSM 참조
+  subnet_id              = local.private_subnet_ids[0]
+  vpc_security_group_ids = [local.app_sg_id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_ssm.name
 
   # EBS 최적화 명시 (t3는 기본 활성이나 명시적 선언 — CKV_AWS_135 대응)
