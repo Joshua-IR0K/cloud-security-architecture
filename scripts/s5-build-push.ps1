@@ -1,18 +1,9 @@
-﻿# ============================================================
-# scripts/s5-build-push.ps1 — Stage 5 골든 패스
-# ============================================================
-# 이 스크립트가 Stage 6 의 "참조 구현(reference implementation)"이다.
-#   Stage 5: 사람이 이 절차를 실행해 계약이 동작함을 증명
-#   Stage 6: GitHub Actions 러너가 "동일한 절차"를 실행 (Developer Laptop → Runner)
-#   → 새 도구·새 파이프라인을 도입하는 게 아니라, 실행 주체만 교체한다.
-#
-# 절차: buildx build → Trivy 게이트 → ECR 로그인 → push → 검증
+﻿# 절차: buildx build → Trivy 게이트 → ECR 로그인 → push → 검증
 #
 # 사용:
 #   .\scripts\s5-build-push.ps1 -Variant good
 #   .\scripts\s5-build-push.ps1 -Variant vuln -SkipTrivyGate
 #   .\scripts\s5-build-push.ps1 -Variant good -Tag s5-immutability-test   # ③ 축 실험
-# ============================================================
 
 param(
   [Parameter(Mandatory = $true)]
@@ -34,9 +25,9 @@ $env:AWS_PROFILE = $Profile
 
 function Step($msg) { Write-Host "`n[s5] $msg" -ForegroundColor Cyan }
 
-# ── 0. 사전 확인 ──────────────────────────────────────────
+# 0. 사전 확인
 Step "사전 확인"
-#   ⚠ 네이티브 CLI 호출은 exit code 로 판정한다 (트러블슈팅 #3)
+#   ⚠ 네이티브 CLI 호출은 exit code 로 판정한다
 $prevEAP = $ErrorActionPreference; $ErrorActionPreference = "Continue"
 $acct = & aws sts get-caller-identity --query "Account" --output text 2>$null
 $stsExit = $LASTEXITCODE
@@ -57,7 +48,7 @@ if ($ssmExit -ne 0 -or [string]::IsNullOrWhiteSpace($repoUrl)) {
 }
 Write-Host "     repo    = $repoUrl"
 
-# ── 1. 태그 결정 ──────────────────────────────────────────
+# 1. 태그 결정
 # latest 를 쓰지 않는다: 어떤 커밋의 산출물인지 식별할 수 없고,
 # IMMUTABLE 리포지토리에서 재사용이 불가능하며, S6/S7 의 태그 진화와 어긋난다.
 #   S5: s5-<variant>-<git sha>   S6: s6-<full GITHUB_SHA>   S7: digest + 서명
@@ -70,27 +61,27 @@ $image   = "${repoUrl}:${Tag}"
 $context = "images/s5-$Variant"
 Step "빌드 대상: $image  (context: $context)"
 
-# ── 2. buildx 빌드 ────────────────────────────────────────
-# buildx(BuildKit)를 쓰는 이유: Stage 6 에서 SBOM·provenance attestation 을
+# 2. buildx 빌드
+# buildx(BuildKit)를 쓰는 이유: S6 에서 SBOM·provenance attestation 을
 # 붙일 때 같은 빌더를 그대로 쓴다 — 골든 패스와 CI 의 도구를 일치시킨다.
 # --platform linux/amd64: 노드가 x86_64 (AL2023_x86_64_STANDARD)
-# ⚠ --provenance=false --sbom=false (트러블슈팅 #18):
+# ⚠ --provenance=false --sbom=false:
 #   buildx 기본값은 provenance attestation 을 생성하는데, 그러면 푸시 결과가
 #     태그 → Image Index → [ Image, attestation ]
 #   구조가 된다. Inspector 는 **인덱스를 스캔하지 못하고**(UNSUPPORTED_MEDIA_TYPE)
 #   실제 이미지는 태그가 없어서(SUCCESSFUL, tag=null) 콘솔·CLI 모두에서
 #   "태그별 취약점"이 보이지 않는다. 스캔은 됐는데 연결이 끊기는 것.
-#   → Stage 5 의 목적(태그별 스캔 결과 대비)을 위해 단일 매니페스트로 푸시한다.
+#   → S5 의 목적(태그별 스캔 결과 대비)을 위해 단일 매니페스트로 푸시한다.
 #   → S6 는 Syft로 digest 기준 SBOM을 별도 생성·보존하고, OCI attestation/서명은 S7로 미룬다.
 Step "docker buildx build"
-# --build-arg: 페이지에 빌드 identity 를 굽는다(P1-6) — 로컬 빌드는 git sha 사용
+# --build-arg: 페이지에 빌드 identity 를 굽는다 — 로컬 빌드는 git sha 사용
 $buildSha = (& git rev-parse HEAD 2>$null); if ($LASTEXITCODE -ne 0) { $buildSha = "local" }
 & docker buildx build --platform linux/amd64 --provenance=false --sbom=false `
     --build-arg "BUILD_SHA=$buildSha" `
     --load -t $image $context
 if ($LASTEXITCODE -ne 0) { throw "[s5] 빌드 실패" }
 
-# ── 3. Trivy 게이트 (빌드타임, shift-left) ────────────────
+# 3. Trivy 게이트 (빌드타임, shift-left)
 # Inspector 와 역할이 다르다 — 중복이 아니라 "시점"이 다른 이중화:
 #   Trivy     = 푸시 "전" 차단 (레지스트리에 취약 이미지가 들어가지 않게)
 #   Inspector = 푸시 "후" 지속 재평가 (신규 CVE 공시 대응)
@@ -106,15 +97,15 @@ if ($SkipTrivyGate) {
   }
 }
 
-# ── 4. ECR 로그인 ─────────────────────────────────────────
+# 4. ECR 로그인
 # 장기 액세스 키를 쓰지 않는다 — SSO 단기 세션으로 얻은 자격으로 토큰 발급.
-# (Stage 6 에서는 이 부분이 GitHub OIDC 로 대체된다 — 역시 장기 키 없음)
+# (S6 에서는 이 부분이 GitHub OIDC 로 대체된다 — 역시 장기 키 없음)
 Step "ECR 로그인"
 $registry = $repoUrl.Split("/")[0]
 & aws ecr get-login-password --region $Region | & docker login --username AWS --password-stdin $registry
 if ($LASTEXITCODE -ne 0) { throw "[s5] ECR 로그인 실패" }
 
-# ── 5. 푸시 ───────────────────────────────────────────────
+# 5. 푸시
 Step "docker push"
 & docker push $image
 $pushExit = $LASTEXITCODE
@@ -125,7 +116,7 @@ if ($pushExit -ne 0) {
   exit $pushExit
 }
 
-# ── 6. 결과 ───────────────────────────────────────────────
+# 6. 결과
 Step "푸시 완료 — digest 확인"
 # registry host 뒤의 전체 path가 ECR repository name이다.
 # 예: 123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/devsecops-project/app
