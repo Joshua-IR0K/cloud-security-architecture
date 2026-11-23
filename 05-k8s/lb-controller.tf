@@ -1,6 +1,3 @@
-# ============================================================
-# 05-k8s/lb-controller.tf — AWS Load Balancer Controller (Helm)
-# ============================================================
 # IAM 역할·정책·Pod Identity association 은 04-eks 소유 (AWS 평면).
 # 여기는 차트 설치만 — 두 평면 분리 원칙.
 #
@@ -11,8 +8,8 @@
 # Service Mutator webhook readiness race는 별개의 문제이며,
 # 아래 enableServiceMutatorWebhook=false 로 제거한다.
 
-# ── Helm Release ──────────────────────────────────────────
-# 의존 사슬(스택 분리 후): [04] 클러스터·노드·association → [05] helm → TGB
+# Helm Release
+# 의존 사슬: [04] 클러스터·노드·association → [05] helm → TGB
 #   스택 경계가 곧 순서 보장 — 04 apply 완료 없이는 05 의 data 조회부터 실패
 # helm install 이 TargetGroupBinding CRD 를 자동 설치
 #   → kubectl_manifest(TGB) 는 이 릴리스에 depends_on (workload.tf)
@@ -38,11 +35,11 @@ resource "helm_release" "aws_lb_controller" {
         name   = "aws-load-balancer-controller"
       }
 
-      # Stage 1 = 노드 1대: 기본 HA(replica 2) 대신 1로 시작
-      # Stage 3 노드 2대 확장 시 2로 올려 HA 복원 (다이얼)
+      # S1 = 노드 1대: 기본 HA(replica 2) 대신 1로 시작
+      # S3 노드 2대 확장 시 2로 올려 HA 복원 (다이얼)
       replicaCount = 1
 
-      # ── Service Mutator Webhook 비활성화 (Stage 7) ──────────────
+      # Service Mutator Webhook 비활성화 (S7)
       # 이 webhook 의 용도는 "Service type=LoadBalancer 를 LBC 가 프로비저닝하게
       # 만드는 것"이다. 우리는 ALB 를 03-workload 가 소유하고 TargetGroupBinding
       # 으로 연결하므로 type=LoadBalancer 를 쓰지 않는다
@@ -54,7 +51,7 @@ resource "helm_release" "aws_lb_controller" {
       #   컴포넌트가 Service 를 만들면 다음으로 그 컴포넌트 설치가 실패한다:
       #     Internal error occurred: failed calling webhook "mservice.elbv2.k8s.aws":
       #     no endpoints available for service "aws-load-balancer-webhook-service"
-      #   Stage 7 에서 Kyverno helm 이 정확히 이 이유로 깨졌다.
+      #   S7 에서 Kyverno helm 이 정확히 이 이유로 깨졌다.
       #   Kyverno 도입 전에는 05 가 만드는 Service 가 nginx 하나뿐이었고 LBC 보다
       #   늦게 생성돼 우연히 드러나지 않았다.
       #
@@ -78,7 +75,7 @@ resource "helm_release" "aws_lb_controller" {
   # TGB는 workload.tf에서 이 release에 depends_on 하므로 LBC readiness 이후 생성된다.
   #
   # ⚠ atomic = true 는 의도적으로 두지 않는다:
-  #   실패 시 자동 롤백(uninstall)되어 **진단 흔적이 사라진다.** Stage 7 에서
+  #   실패 시 자동 롤백(uninstall)되어 **진단 흔적이 사라진다.** S7 에서
   #   Kyverno helm 이 깨졌을 때 실패한 릴리스가 남아 있었기에 helm list 로 상태를
   #   확인하고 원인(webhook endpoint 미준비)을 추적할 수 있었다.
   #   그리고 atomic 은 실패를 깔끔히 처리할 뿐 실패 자체를 막지 못한다 —
@@ -86,7 +83,4 @@ resource "helm_release" "aws_lb_controller" {
   wait    = true
   timeout = 600
 
-  #depends_on = [
-  #  aws_eks_pod_identity_association.lb_controller,
-  #]
 }

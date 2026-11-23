@@ -1,47 +1,29 @@
-# ============================================================
-# 05-k8s/workload.tf — 워크로드 (nginx + TGB)
-# ============================================================
-#
-# 리소스 타입 배분 원칙 (B-1):
+# 리소스 타입 배분 원칙:
 #   Deployment/Service = typed kubernetes 리소스 (스키마 안정, 깔끔한 diff)
 #   TargetGroupBinding = kubectl_manifest (유일한 CRD —
 #     HashiCorp kubernetes_manifest 는 plan 시점 CRD 요구로 fresh apply 불가)
 #
-# 소유권 (D42 Delegated Field Ownership) — "이관"이 아니다:
-#   Terraform : 이 Deployment 의 구조·보안 전체를 계속 소유
-#               (replica·probe·볼륨·SA·securityContext·분산·Service·TGB·PDB)
-#   CI        : 컨테이너 image 필드 **하나만** 위임받음(ignore_changes)
-#   → 워크로드 전체가 파이프라인으로 넘어가는 것이 아니다.
+# 파드 보안 설정(비루트·권한 상승 금지·capabilities 제거·seccomp·읽기 전용 루트·SA 토큰 미마운트)은
+#   PSA restricted 요구사항과 1:1 이다 — 하나라도 빠지면 app 에서 파드가 거부된다.
 #
-# [3단계 파트 2] 파드 보안 하드닝 (위협모델 G4·G6)
-#   · app 네임스페이스로 이동 — PSA restricted 가 강제되는 곳 (namespace.tf)
-#   · 비루트(UID 101) · 권한 상승 금지 · capabilities 전부 제거 · seccomp RuntimeDefault
-#   · 루트 파일시스템 읽기 전용 — nginx 가 쓰는 곳(/tmp: pid·임시 파일)만 emptyDir 로 연다
-#   · SA 토큰 미마운트 — nginx 는 쿠버네티스 API 를 부를 일이 없다
-#   · 포트 8080 — 파트 1 의 nginx-unprivileged 는 1024 미만 포트를 쓰지 않는다
-#   이 조합은 PSA restricted 요구사항과 1:1 이다 — 하나라도 빠지면 app 에서 파드가 거부된다.
-#
-# [3단계 파트 3] 가용성 — "파드가 언제 사라지는가"마다 통제 하나씩
+# 가용성 — "파드가 언제 사라지는가"마다 통제 하나씩
 #   · 배포로 교체될 때          → RollingUpdate maxSurge 1 / maxUnavailable 0 (Ready 2개 유지)
 #   · 노드·AZ 가 사라질 때       → topologySpreadConstraints (AZ·노드 분산, soft)
 #   · 프로세스가 응답을 멈출 때  → livenessProbe 로 재시작 (readiness 보다 느슨하게)
 #   · 드레인·노드 교체(자발적)   → PodDisruptionBudget minAvailable 1
-# ============================================================
 
 locals {
-  # 생성 시점 기준 이미지 (D43) — tag 는 사람이 읽는 이름, digest 가 실제 내용
+  # 생성 시점 기준 이미지 — tag 는 사람이 읽는 이름, digest 가 실제 내용
   app_image = "${local.ecr_repository_url}:${var.app_image_tag}@${var.app_image_digest}"
   app_uid   = "101" # nginx-unprivileged 의 nginx 사용자 (images/s5-good/Dockerfile USER 101)
 }
 
-# ⚠ nginx_index ConfigMap 제거 (P1-6)
+# ⚠ html 을 ConfigMap 으로 마운트하지 않는다
 #   ConfigMap 이 /usr/share/nginx/html 을 마운트하면 이미지가 가진 콘텐츠를
 #   통째로 가린다. 그러면 HTTPS 응답으로 "어느 커밋의 이미지가 도는지"를
 #   확인할 수 없어 E2E 증거 사슬이 끊긴다.
 #     Docker Image → application artifact  (콘텐츠 소유)
 #     ConfigMap    → runtime configuration (필요해지면 conf.d 에 마운트)
-#   S1~S5 에서 이 ConfigMap 이 하던 "Served from EKS" 차별화 역할은
-#   이제 이미지 안의 index.html(빌드 SHA 포함)이 대신한다.
 
 resource "kubernetes_deployment_v1" "nginx" {
   metadata {
@@ -55,7 +37,7 @@ resource "kubernetes_deployment_v1" "nginx" {
   spec {
     replicas = 2 # TG 다중 타깃 확인 + PDB(minAvailable 1)와 짝 — 한 번에 1개까지만 내려간다
 
-    # [3단계 파트 3] 롤아웃 중에도 Ready 파드 2개 유지 — 새 파드가 Ready 가 된 뒤에 기존 파드를 내린다.
+    # 롤아웃 중에도 Ready 파드 2개 유지 — 새 파드가 Ready 가 된 뒤에 기존 파드를 내린다.
     #   2 레플리카에서는 기본값(25%)도 결과가 같지만(올림 1 / 내림 0) 의도를 코드에 고정한다
     #   — 레플리카를 늘려도 "롤아웃 중 가용 감소 0" 이 유지된다. CI 롤아웃(set image)도 이 규칙을 따른다.
     strategy {
@@ -93,7 +75,7 @@ resource "kubernetes_deployment_v1" "nginx" {
           }
         }
 
-        # [3단계 파트 3] AZ·노드 분산 — soft(ScheduleAnyway)
+        # AZ·노드 분산 — soft(ScheduleAnyway)
         #   노드가 1대면 두 파드가 같은 노드에 뜨고(스케줄을 막지 않음), 2대 이상이면 흩어 놓는다.
         #   hard(DoNotSchedule)로 하면 노드 1대·AZ 1개일 때 두 번째 파드가 Pending 이 된다.
         #   zone = AZ 장애 대비, hostname = 노드 장애·교체 대비 (같은 AZ 에 노드가 여럿일 때).
@@ -122,11 +104,9 @@ resource "kubernetes_deployment_v1" "nginx" {
 
         container {
           name = "nginx"
-          # 이미지 이력: Stage 1 공용 이미지(가변 태그) → Stage 5 우리 ECR(IMMUTABLE 태그)
-          #   → 3단계 tag@digest (서명 검증은 S7). 노드롤의 AmazonEC2ContainerRegistryReadOnly 로
-          #   pull 한다 (추가 IAM 없음 — S2 detach 때 보존된 권한).
-          # 생성 시점 기준 이미지(D43) — 이후 이미지는 CI 가 롤아웃한다(D42, 아래 lifecycle).
-          #   ⚠ 파트 1 의 비루트 이미지여야 한다 — 이전 이미지(root 실행)는 아래 securityContext 와
+          # 노드롤의 AmazonEC2ContainerRegistryReadOnly 로 pull 한다 (추가 IAM 없음 — S2 detach 때 보존된 권한).
+          # 생성 시점 기준 이미지 — 이후 이미지는 CI 가 롤아웃한다 (아래 lifecycle).
+          #   ⚠ 비루트 이미지여야 한다 — root 로 실행되는 이미지는 아래 securityContext 와
           #     PSA restricted 에 거부되어 파드가 뜨지 않는다.
           image = local.app_image
 
@@ -167,7 +147,7 @@ resource "kubernetes_deployment_v1" "nginx" {
             period_seconds        = 5
           }
 
-          # [3단계 파트 3] liveness — "살아 있는가". 응답이 멈췄으면 컨테이너를 재시작한다.
+          # liveness — "살아 있는가". 응답이 멈췄으면 컨테이너를 재시작한다.
           #   readiness 보다 느슨하게: 10초 주기 × 3회 = 약 30초 연속 실패할 때만 재시작.
           #   더 공격적이면 순간 부하에도 재시작이 이어져(재시작 폭풍) 오히려 가용성을 떨어뜨린다.
           #   "/" 는 외부 의존이 없는 정적 페이지라 liveness 로 써도 안전하다
@@ -183,7 +163,7 @@ resource "kubernetes_deployment_v1" "nginx" {
             failure_threshold     = 3
           }
 
-          # 읽기 전용 루트에서 nginx 가 쓰는 유일한 곳 (pid · 임시 파일 — 파트 1 베이스가 /tmp 로 옮겨 둠)
+          # 읽기 전용 루트에서 nginx 가 쓰는 유일한 곳 (pid · 임시 파일 — 베이스 이미지가 /tmp 로 옮겨 둠)
           volume_mount {
             name       = "tmp"
             mount_path = "/tmp"
@@ -200,7 +180,7 @@ resource "kubernetes_deployment_v1" "nginx" {
     }
   }
 
-  # ── Delegated Field Ownership (D42) ───────────────────────
+  # Delegated Field Ownership (D42)
   # 컨테이너 이미지 필드의 소유권을 CI 에 명시적으로 위임한다.
   #
   # 왜 필요한가:
@@ -235,7 +215,7 @@ resource "kubernetes_deployment_v1" "nginx" {
   }
 }
 
-# ── PodDisruptionBudget (3단계 파트 3) ─────────────────────
+# PodDisruptionBudget
 # 드레인·노드 교체 같은 "자발적 중단" 때 nginx 가 한꺼번에 사라지지 않게 한다.
 #   minAvailable 1 + replicas 2 = 한 번에 1개까지만 퇴거(evict) 허용.
 #   노드가 1대일 때 그 노드를 드레인하면: 첫 파드는 퇴거되고, 두 번째는 PDB 가 막는다
@@ -281,12 +261,12 @@ resource "kubernetes_service_v1" "nginx" {
   }
 }
 
-# ── TargetGroupBinding ────────────────────────────────────
+# TargetGroupBinding
 # 03-workload 의 EKS 타깃그룹(weight 0 으로 리스너에 이미 연결됨)에
 # nginx Service 의 파드 IP 들을 바인딩
 # networking.ingress: LB Controller 가 노드/파드 SG 에
 #   "ALB SG 발신 → TCP/8080" 인그레스 규칙을 자동 생성 (최소 개방)
-#   [3단계 파트 2] 포트는 서비스 포트(80)가 아니라 파드가 실제로 듣는 포트(8080)다.
+#   포트는 서비스 포트(80)가 아니라 파드가 실제로 듣는 포트(8080)다.
 #   ALB 쪽 egress 는 01 의 alb_to_eks_pods 규칙이 연다.
 resource "kubectl_manifest" "nginx_tgb" {
   yaml_body = <<-YAML
@@ -311,7 +291,7 @@ resource "kubectl_manifest" "nginx_tgb" {
                 port: 8080
   YAML
 
-  # CRD(helm 설치) + Service 존재 후 적용 — B-1 사슬의 마지막 고리
+  # CRD(helm 설치) + Service 존재 후 적용
   depends_on = [
     helm_release.aws_lb_controller,
     kubernetes_service_v1.nginx,

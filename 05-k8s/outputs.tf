@@ -1,12 +1,8 @@
-# ============================================================
-# 05-k8s/outputs.tf — 검증 헬퍼 (kubectl 명령 생성)
-# ============================================================
 # 실행: Invoke-Expression (terraform output -raw <이름>)
 #
 # 04 소유 AWS 리소스 이름은 "결정론적 재구성"으로 얻는다 —
 # SSM 계약을 늘리지 않기 위함(결정 a: 계약은 cluster_name 하나).
 #   버킷명 = <project>-s2-identity-demo-<account_id>  (04 와 동일 공식)
-# ============================================================
 
 data "aws_caller_identity" "current" {}
 
@@ -89,18 +85,15 @@ output "s3_node_scale" {
   value       = "aws eks update-nodegroup-config --cluster-name ${local.cluster_name} --region ${var.region} --nodegroup-name $(aws eks list-nodegroups --cluster-name ${local.cluster_name} --region ${var.region} --query \"nodegroups[0]\" --output text) --scaling-config minSize=0,maxSize=3,desiredSize=2"
 }
 
+# S4 검증 — 3축 + K8s Secret 미생성
 
-# ============================================================
-# Stage 4 검증 — 3축 + D9 증명
-# ============================================================
-
-# ── ① BREAK: 자격 없는 파드는 기동 자체가 안 됨 ───────────
+# ① BREAK: 자격 없는 파드는 기동 자체가 안 됨
 output "s4_verify_denied" {
   description = "①실패가 정답 — ContainerCreating 에서 멈춤 (마운트 실패)"
   value       = "kubectl get pods -l role=s4-denied ; kubectl describe pod -l role=s4-denied | Select-String 'FailedMount|not authorized|Warning'"
 }
 
-# ── ② BUILD: 마운트된 파일 확인 ───────────────────────────
+# ② BUILD: 마운트된 파일 확인
 output "s4_verify_mounted" {
   description = "②성공이 정답 — db-username, db-password 파일이 보임"
   value       = "kubectl exec deploy/secrets-granted -- ls -l /mnt/secrets-store/"
@@ -111,7 +104,7 @@ output "s4_verify_content" {
   value       = "kubectl exec deploy/secrets-granted -- cat /mnt/secrets-store/db-username"
 }
 
-# ── ③ 머니샷: egress 차단 + 시크릿 존재 ──────────────────
+# ③ egress 차단 + 시크릿 존재
 output "s4_verify_egress_denied" {
   description = <<-EOT
     ★머니샷 — 타임아웃/실패가 정답.
@@ -127,7 +120,7 @@ output "s4_verify_egress_denied" {
   value       = "kubectl exec deploy/secrets-granted -- aws secretsmanager list-secrets --region ${var.region} --cli-connect-timeout 5 --cli-read-timeout 10"
 }
 
-# ── ④ D9 증명: ESO 기각 근거의 실제 검증 (차별화) ─────────
+# ④ K8s Secret 미생성 확인 (ESO 대신 CSI 를 고른 근거)
 output "s4_verify_d9_no_k8s_secret" {
   description = <<-EOT
     ④-1 K8s Secret 객체가 생성되지 않았음 = etcd 무노출.
@@ -151,7 +144,7 @@ output "s4_verify_d9_tmpfs" {
   value       = "kubectl exec deploy/secrets-granted -- cat /proc/mounts | Select-String 'secrets-store'"
 }
 
-# ── 보너스: 키 정책 ViaService 경계 실증 ──────────────────
+# 보너스: 키 정책 ViaService 경계 실증
 output "s4_verify_viaservice_boundary" {
   description = <<-EOT
     세 번째 관문의 실증 — 역할에 kms:Decrypt 가 "있어도" 직접 호출은 거부된다.
@@ -161,7 +154,6 @@ output "s4_verify_viaservice_boundary" {
   value       = "kubectl exec deploy/secrets-granted -- aws kms decrypt --ciphertext-blob fileb:///dev/null --region ${var.region}"
 }
 
-# ── 회전 데모 (선택) ──────────────────────────────────────
 output "s4_verify_rotation" {
   description = <<-EOT
     선택 실증 — 04 에서 -var 'demo_secret_version=2' 로 apply 한 뒤,
@@ -172,10 +164,7 @@ output "s4_verify_rotation" {
   value       = "kubectl exec deploy/secrets-granted -- sha256sum /mnt/secrets-store/db-password"
 }
 
-
-# ============================================================
-# 3단계 파트 2 검증 — app 네임스페이스 PSA · 파드 보안
-# ============================================================
+# v1 보강 검증 — app 네임스페이스 PSA · 파드 보안
 
 output "hardening_psa_labels" {
   description = "app 네임스페이스 PSA 라벨 — enforce·audit·warn 모두 restricted, 각 -version 은 v1.35"
@@ -199,10 +188,7 @@ output "hardening_psa_reject" {
   value       = "kubectl -n app run psa-probe --image=public.ecr.aws/docker/library/busybox:stable --restart=Never --dry-run=server -- sleep 1"
 }
 
-
-# ============================================================
-# 3단계 파트 3 검증 — 가용성 (분산 · PDB)
-# ============================================================
+# v1 보강 검증 — 가용성 (분산 · PDB)
 
 output "availability_spread" {
   description = <<-EOT

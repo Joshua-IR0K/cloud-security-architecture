@@ -1,12 +1,3 @@
-# ============================================================
-# 05-k8s/variables.tf — K8s 평면 변수
-# ============================================================
-# ★ 게이트 분리(스택 분리의 부수 효과):
-#   cni_node_role_policy_attached → 04-eks (AWS 평면 = IAM)
-#   network_policy_enforcement    → 05-k8s (K8s 평면 = 정책 리소스)
-#   현재 final bundle은 실제 적용값을 terraform.tfvars 또는 명시적 -var 로 전달한다.
-# ============================================================
-
 variable "region" {
   description = "AWS 리전"
   type        = string
