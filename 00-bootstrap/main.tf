@@ -46,7 +46,7 @@ variable "project_name" {
 data "aws_caller_identity" "current" {}
 
 resource "aws_s3_bucket" "terraform_state" {
-  #checkov:skip=CKV_AWS_145:SSE-S3 적용 중. CMK 격상은 CI OIDC 권한 연쇄 설계 필요 — HARDENING_BACKLOG #1, Phase 4C 후 별도 증분
+  #checkov:skip=CKV_AWS_145:SSE-S3 사용 — CMK 로 바꾸려면 CI plan 역할의 KMS 권한까지 함께 설계해야 해 보류
   bucket = "${var.project_name}-terraform-state-${data.aws_caller_identity.current.account_id}"
 
   lifecycle {
@@ -85,16 +85,11 @@ resource "aws_s3_bucket_public_access_block" "terraform_state" {
   restrict_public_buckets = true
 }
 
-# 목적: CloudTrail(02-security)이 배포되기 이전 구간,
-#       즉 bootstrap → 01-network 프로비저닝 시점부터
-#       state 파일에 대한 모든 접근(GetObject, PutObject 등)을 기록.
-#       이로써 초기 인프라 구성 단계의 감사 공백(Blind Spot)을 원천 차단.
-#
-# 구성: state 버킷과 분리된 전용 로그 버킷 사용
-#       (로그와 데이터를 같은 버킷에 두면 로그가 로그를 낳는 무한루프 발생)
+# state 버킷 액세스 로그 — CloudTrail(02)이 생기기 전 구간(00·01 프로비저닝)의 state 접근도 남김
+# 로그는 별도 버킷에 쓴다 — 같은 버킷에 쓰면 로그가 다시 로그를 만듬
 
 resource "aws_s3_bucket" "terraform_state_log" {
-  #checkov:skip=CKV_AWS_145:SSE-S3 적용 중. 로그 버킷 CMK는 state 버킷 KMS 증분과 함께 처리 — HARDENING_BACKLOG #1
+  #checkov:skip=CKV_AWS_145:SSE-S3 사용 — state 버킷을 CMK 로 바꿀 때 함께 처리
   bucket = "${var.project_name}-tf-state-log-${data.aws_caller_identity.current.account_id}"
 
   lifecycle {
@@ -102,7 +97,7 @@ resource "aws_s3_bucket" "terraform_state_log" {
   }
 
   tags = {
-    Name = "${var.project_name}-terraform-state-log"
+    Name    = "${var.project_name}-terraform-state-log"
     Purpose = "S3 Server Access Log Storage"
   }
 }
@@ -115,8 +110,7 @@ resource "aws_s3_bucket_ownership_controls" "terraform_state_log" {
   }
 }
 
-# 로그 버킷도 state 버킷과 동일한 보안 기준 적용
-# (로그 버킷이 더 약하면 로그 버킷을 통한 우회 공격 경로 발생)
+# 로그 버킷도 state 버킷과 같은 보안 기준 — 더 약하면 우회 경로가 됨
 resource "aws_s3_bucket_public_access_block" "terraform_state_log" {
   bucket = aws_s3_bucket.terraform_state_log.id
 
@@ -145,7 +139,7 @@ resource "aws_s3_bucket_versioning" "terraform_state_log" {
 }
 
 # 로그 버킷 라이프사이클 — 액세스 로그는 무한 축적 방지
-# (state 버킷과 달리 로그는 만료시켜도 무방 — 오래된 액세스 로그는 가치 낮음)
+# (state 버킷과 달리 로그는 만료시켜도 무방)
 resource "aws_s3_bucket_lifecycle_configuration" "terraform_state_log" {
   bucket = aws_s3_bucket.terraform_state_log.id
 
@@ -194,7 +188,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {
     filter {}
 
     noncurrent_version_expiration {
-      noncurrent_days = 90   # 90일치 state 이력 보관 (롤백 대비)
+      noncurrent_days = 90 # 90일치 state 이력 보관 (롤백 대비)
     }
     abort_incomplete_multipart_upload {
       days_after_initiation = 7
@@ -203,7 +197,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {
 }
 
 resource "aws_dynamodb_table" "terraform_lock" {
-  #checkov:skip=CKV_AWS_119:Lock 테이블은 잠금 메타데이터(LockID)만 보관, 민감정보 없음. 기본 암호화로 충분 — CMK는 비용/복잡도 대비 효과 없음 (문서화된 결정)
+  #checkov:skip=CKV_AWS_119:Lock 테이블은 잠금 메타데이터(LockID)만 보관, 민감정보 없음. 기본 암호화로 충분 — CMK는 비용/복잡도 대비 효과 없음
   name         = "${var.project_name}-terraform-lock"
   billing_mode = "PAY_PER_REQUEST" # 온디맨드 — apply 시에만 사용, 사실상 무료
   hash_key     = "LockID"

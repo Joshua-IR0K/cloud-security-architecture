@@ -1,11 +1,5 @@
-# ★ 이 역할의 AWS 권한은 극단적으로 좁다 — eks:DescribeCluster 하나뿐.
-#   Kubernetes 에 대한 실제 권한은 IAM 이 아니라
-#   EKS Access Entry + 네임스페이스 RBAC 이 결정한다(04/05).
-#   → "AWS 권한"과 "K8s 권한"을 분리해 각각 최소화하는 구조.
-#
-# ⚠ CodeBuild 러너에서 실행되더라도 AWS 접근은 이 역할(GitHub OIDC)을 쓴다.
-#   CodeBuild 서비스 역할은 러너 배관(VPC ENI/로그/연결)만 담당한다.
-#   두 신원을 혼동하지 않는 것이 S6-B 의 핵심 보안 판단.
+# AWS 권한은 eks:DescribeCluster 하나. 쿠버네티스 권한은 EKS 접근 항목과 네임스페이스 RBAC(04·05)이 정한다.
+# CodeBuild 러너에서 돌아도 AWS 접근은 이 역할로 한다 — 러너 서비스 역할(02)은 배관만 맡음
 
 data "aws_iam_policy_document" "github_assume_deploy" {
   statement {
@@ -23,10 +17,7 @@ data "aws_iam_policy_document" "github_assume_deploy" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # ★ main ref 만 — PR 에서는 배포 역할을 수임할 수 없다.
-    #   신뢰 경계: untrusted PR(특히 향후 public 전환 시 fork PR)이
-    #   프라이빗 배포 경로를 실행하지 못하게 하는 1차 방어.
-    #   (2차 방어는 워크플로의 job 조건, 3차는 GitHub Environment 보호 규칙)
+    # main ref 만 — PR(공개 전환 후 포크 PR 포함)은 배포 경로를 실행할 수 없음
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
@@ -52,9 +43,7 @@ resource "aws_iam_role" "github_actions_deploy" {
   }
 }
 
-# AWS 권한: kubeconfig 생성에 필요한 최소
-# aws eks update-kubeconfig 가 DescribeCluster 를 호출한다.
-# 그 외 AWS 권한은 없다 — 클러스터 변경·노드 조작·ECR 접근 모두 불가.
+# kubeconfig 생성(aws eks update-kubeconfig)에 필요한 DescribeCluster만. 클러스터 변경·노드·ECR 권한은 없음
 data "aws_iam_policy_document" "deploy_permissions" {
   statement {
     sid       = "DescribeClusterForKubeconfig"

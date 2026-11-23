@@ -1,16 +1,6 @@
-# 00-bootstrap/github_oidc_sign.tf — S7 서명 전용 역할 (신규)
-# 역할 4분할의 마지막: plan / build / deploy / **sign**
-#
-# 왜 gha-build 에 kms:Sign 을 얹지 않는가 — 이것이 S7 thesis 의 핵심이다:
-#   빌드 역할이 서명까지 할 수 있으면 "빌드 경로 침해 → 임의 아티팩트 서명"이 되어
-#   admission 통제 전체가 무력화된다. 서명 권한(signing authority)의 분리가
-#   S7 보안 주장의 하중을 진다.
-#
-# ⚠ 방어 범위의 정직한 한정 (ADR 기록 대상):
-#   같은 워크플로에서 두 역할을 모두 수임할 수 있으므로, 이 분리가 막는 것은
-#   **자격증명 유출**이지 **워크플로 자체의 침해**가 아니다.
-#   워크플로 침해까지 막으려면 서명을 별도 job + GitHub Environment 승인으로
-#   분리해야 한다 → 프로덕션 델타로 기록하고 이번 스코프에서는 하지 않는다.
+# 서명 역할 — 현재 워크플로에는 연결하지 않았다 (README 다음 단계 "이미지 서명과 admission 검증")
+# build 역할과 분리한다 — build 경로가 뚫려도 임의 이미지에 서명할 수 없게
+# 한계: 같은 워크플로가 두 역할을 모두 받을 수 있어, 막는 것은 자격증명 유출이지 워크플로 침해가 아니다 (막으려면 별도 job + 승인 게이트)
 
 data "aws_iam_policy_document" "github_assume_sign" {
   statement {
@@ -50,15 +40,8 @@ resource "aws_iam_role" "github_actions_sign" {
   lifecycle { prevent_destroy = true }
 }
 
-# ⚠ 이 역할에는 여기서 정책을 붙이지 않는다.
-#   kms:Sign 은 **키 정책**(02-security/signing_key.tf)이 principal 로 직접 위임한다.
-#   → 키 소유 스택이 그 키의 사용 주체를 정의한다는 원칙.
-#
-# ⚠ 단 ECR 권한은 **필요하다** — cosign 은 서명값 생성 후 아티팩트를
-#   레지스트리에 push 하기 때문이다. 그 정책은 02-security 가 소유·부착한다
-#   (리소스 소유 스택이 그 리소스 권한을 정의한다는 원칙).
-#
-# 의도적 부재: EKS 배포 / Secrets 접근 / ECR 삭제 — 이 역할은 서명하고 저장만 한다.
+# 정책은 여기서 붙이지 않음 — kms:Sign 은 키 정책(02 signing_key.tf)이, 서명 아티팩트용 ECR 쓰기는 02 의 정책이 위임한다.
+# 의도적 부재: EKS 배포, Secrets 접근, ECR 삭제.
 
 resource "aws_ssm_parameter" "github_sign_role_arn" {
   name        = "/${var.project_name}/bootstrap/github_sign_role_arn"

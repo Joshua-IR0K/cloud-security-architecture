@@ -8,9 +8,7 @@ resource "aws_iam_openid_connect_provider" "github" {
   url            = "https://token.actions.githubusercontent.com"
   client_id_list = ["sts.amazonaws.com"]
 
-  # GitHub thumbprint — AWS는 GitHub OIDC에 대해 이 값을 검증에 쓰지 않고
-  # 자체 신뢰 CA 라이브러리로 검증함(2023.7~). 따라서 단일 값으로 충분하며
-  # 인증서 교체 시에도 중단 없음. (provider 5.x는 이 필드가 필수)
+  # AWS 는 GitHub OIDC 를 자체 신뢰 CA 로 검증해 이 값을 쓰지 않는다 — 단일 값이면 충분하고 인증서가 바뀌어도 끊기지 않음 (provider 5.x 필수 필드)
   thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
 
   tags = {
@@ -39,23 +37,9 @@ data "aws_iam_policy_document" "github_assume" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # ★ pull_request 만 신뢰한다 (StringEquals — 와일드카드 없음)
-    #
-    # main ref 를 지운 이유 — 쓰이지 않는데 위험한 경로였다
-    #   이 역할을 쓰는 워크플로는 terraform-plan.yml 하나이고 pull_request 에서만 돈다.
-    #   신뢰에 main 이 남아 있으면 main 에서 도는 다른 잡(예: build-deploy 의 build 잡)도
-    #   이 역할을 수임할 수 있다. id-token 권한이 있는 잡에서는 어떤 스텝이든(서드파티 액션
-    #   포함) OIDC 토큰을 새로 받아 sub 가 맞는 역할을 수임할 수 있기 때문이다.
-    #
-    # GitHub Environment 로 sub 를 핀하지 않은 이유
-    #   비공개 레포 + Free 요금제에서는 Environment 의 보호 기능(required reviewers,
-    #   deployment branches)이 제공되지 않는다. 보호 규칙 없는 Environment 는 아무 브랜치의
-    #   잡이나 선언할 수 있으므로 sub 를 environment 로 바꿔도 통제가 생기지 않는다.
-    #   → 승인 게이트 대신 "이 역할이 무엇을 읽을 수 있는가"를 줄이는 권한 분리로 방어한다.
-    #   레포 공개 시 적용할 설계: environment:ci-plan 핀 + required reviewer.
-    #
-    # [Fork PR] 비공개 레포라 외부인이 fork 할 수 없고, fork PR 은 id-token 권한이
-    #   없어 OIDC 토큰을 받지 못한다.
+    # pull_request 만 신뢰한다 (StringEquals). 쓰지 않는 ref 는 신뢰에서 뺐다.
+    # Environment 로 sub 를 핀하지 않는다 — 비공개+Free 에서는 보호 규칙이 없어 통제가 생기지 않는다. 공개 전환 시 environment 핀 + required reviewer.
+    # 포크 PR 은 id-token 권한이 없어 OIDC 토큰을 받지 못함
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
@@ -80,20 +64,10 @@ resource "aws_iam_role" "github_actions_plan" {
 }
 
 data "aws_iam_policy_document" "plan_permissions" {
+  # 읽기 — CI 가 plan 하는 01·02 가 실제로 쓰는 서비스만. Describe/List 는 대부분 리소스 수준 제한이 없어 "*".
+  # 조회 API 도 비밀을 돌려줄 수 있어 뺐다: cloudfront Get/ListDistributions·elb DescribeRules(오리진 헤더 값), wafv2 GetSampledRequests(요청 헤더), config Get*(설정 이력).
+  # logs 는 메타데이터와 저장 쿼리 정의 조회만 — 로그 내용(GetLogEvents·FilterLogEvents·StartQuery)은 제외하고 가드가 확인함.
 
-  # 읽기 — plan 은 현재 상태를 읽어 코드와 비교
-  # ※ 대부분의 Describe/List API 는 리소스 수준 제한을 지원하지 않아 resources=["*"] 가 불가피
-  #
-  # 포함 기준 — "CI 가 plan 하는 01·02 가 실제로 쓰는 서비스만"
-  #   조회 API 도 응답에 비밀을 담을 수 있다:
-  #     cloudfront:GetDistribution(Config)·ListDistributions → 오리진 헤더 X-Origin-Verify 값
-  #     elasticloadbalancing:DescribeRules                   → ALB 규칙 조건의 같은 헤더 값
-  #     wafv2:GetSampledRequests                             → 실제 요청 헤더(세션 쿠키 포함 가능)
-  #   셋 다 03 이 소유한 서비스라 01·02 plan 에는 필요 없다 → 제거.
-  #   config:Get*(설정 이력 내용)도 같은 기준으로 제거.
-  #   logs: 02 에 EKS 컨트롤플레인 로그 그룹이 생겨 메타데이터 조회만 허용한다.
-  #     + 저장 쿼리 정의 조회(DescribeQueryDefinitions) — 이름·쿼리 문자열뿐이고 로그 내용이 아니다.
-  #     로그 내용(GetLogEvents·FilterLogEvents·StartQuery)은 감사 기록 자체라 계속 제외 — 가드가 확인.
   statement {
     sid    = "ReadOnlyForPlan"
     effect = "Allow"
@@ -159,8 +133,7 @@ data "aws_iam_policy_document" "plan_permissions" {
     resources = ["*"]
   }
 
-  # 02 의 data "aws_kms_public_key"(서명 공개키 → SSM 발행)가 GetPublicKey 를 호출한다.
-  #   공개키라 비민감.
+  # 02 의 서명 공개키 조회(GetPublicKey) — 공개키라 민감하진 않음
   statement {
     sid       = "KmsGetPublicKeyForDataSource"
     effect    = "Allow"
@@ -168,8 +141,7 @@ data "aws_iam_policy_document" "plan_permissions" {
     resources = ["arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key/*"]
   }
 
-  # SSM 파라미터 — 프로젝트 경로만 (스택 간 참조값 읽기)
-  #   SecureString 파라미터 없음 (2026-10 확인) → 이 경로로 새는 비밀 없음
+  # SSM — 프로젝트 경로만. SecureString 파라미터는 없음
   statement {
     sid    = "SSMProjectScoped"
     effect = "Allow"
@@ -191,11 +163,8 @@ data "aws_iam_policy_document" "plan_permissions" {
     resources = ["*"] # DescribeParameters는 리소스 제한 미지원
   }
 
-  # S3 — 로그/State 버킷 구성 조회 (plan이 버킷 속성을 읽음)
-  # 프로젝트 버킷 패턴으로 범위 한정 (CKV_AWS_108 대응)
-  # 객체 읽기(GetObject)는 state 두 파일만, 목록(ListBucket)은 아래 두 statement 에서 따로 한정
-  #   ⚠ 이 statement 에 ListBucket 을 넣지 않는다 — resources 가 state 버킷까지 포함해
-  #     state 버킷 전체 목록이 열린다 (statement 는 OR 로 합쳐진다)
+  # S3 버킷 구성 조회 — 프로젝트 버킷 패턴으로 한정. 객체 읽기는 state 두 파일만.
+  # 이 statement 에 ListBucket 을 넣지 않는다 — state 버킷 전체 목록까지 열림(statement 는 OR 로 합쳐짐)
   statement {
     sid    = "S3ReadForPlan"
     effect = "Allow"
@@ -223,12 +192,8 @@ data "aws_iam_policy_document" "plan_permissions" {
     ]
   }
 
-  # 02 로그 버킷 존재 확인 — s3:ListBucket
-  #   aws_s3_bucket 의 refresh 는 HeadBucket 으로 버킷 존재를 확인하고, HeadBucket 은
-  #   s3:ListBucket 권한을 요구한다. 이 권한이 없을 때 CI plan 은 실패하지 않고 4개 버킷을
-  #   "없음"으로 보고 재생성 + 딸린 리소스 15개 교체를 계획했다 (23 add / 4 change / 19 destroy,
-  #   로컬 plan 은 No changes). 에러 없이 틀린 plan — 실패보다 위험하다.
-  #   범위: 로그 버킷 4개 + Athena 결과 버킷. 객체 이름 목록만 보이고 내용(GetObject)은 여전히 막혀 있다.
+  # 02 로그 버킷 존재 확인 — aws_s3_bucket refresh 의 HeadBucket 은 s3:ListBucket 을 요구한다. 범위: 로그 버킷 4개 + Athena 결과 버킷.
+  # 없으면 plan 이 실패하지 않고 버킷을 "없음"으로 보고 재생성을 계획한다 — 에러 없이 틀린 plan.
   statement {
     sid     = "LogBucketExistenceForPlan"
     effect  = "Allow"
@@ -242,11 +207,8 @@ data "aws_iam_policy_document" "plan_permissions" {
     ]
   }
 
-  # Athena 조사 계층 (02 athena.tf) refresh — 메타데이터만
-  #   provider 5.100.0 의 refresh 가 실제로 부르는 API 만 넣었다:
-  #     glue_catalog_database = GetDatabase + GetTags / glue_catalog_table = GetTable + GetPartitionIndexes
-  #     athena_workgroup = GetWorkGroup + ListTagsForResource / athena_named_query = GetNamedQuery
-  #   로그 내용에 닿는 경로(StartQueryExecution·GetQueryResults, 결과 버킷 GetObject)는 없다 — 가드가 쿼리 실행 거부를 확인.
+  # Athena 조사 계층 refresh — provider 5.100.0 이 실제로 부르는 Get* 만 (Glue 데이터베이스·테이블, Athena 워크그룹·저장 쿼리).
+  # 쿼리 실행·결과 조회·결과 버킷 GetObject 는 없다 — 가드가 확인함
   statement {
     sid    = "AthenaCatalogMetadataForPlan"
     effect = "Allow"
@@ -276,14 +238,8 @@ data "aws_iam_policy_document" "plan_permissions" {
     ]
   }
 
-  # State 접근 — CI plan 에 필요한 만큼만
-  #
-  # 스택별 state 민감도 (2026-10 평가):
-  #   00  로컬 state (버킷에 없음)                          → 해당 없음
-  #   01  민감정보 없음                                      → 허용
-  #   02  시크릿 값 리소스를 Terraform 관리에서 뺀 뒤 없음   → 허용
-  #   03  Okta 시크릿 2곳 + X-Origin-Verify 3곳             → 차단 (plan 은 로컬에서만)
-  #   04·05  민감정보 없음, 임시 스택이라 CI plan 대상 아님  → 차단 (불필요)
+  # State — 01·02 만 읽는다. 03 은 Okta 시크릿과 Origin 헤더 값이 들어 있어 차단(plan 은 로컬에서만),
+  # 04·05 는 임시 스택이라 CI plan 대상이 아니다. 00 은 로컬 state
 
   # State 객체 읽기 — 01·02 두 파일만
   statement {
@@ -293,11 +249,8 @@ data "aws_iam_policy_document" "plan_permissions" {
     resources = [for k in local.plan_state_keys : "${aws_s3_bucket.terraform_state.arn}/${k}"]
   }
 
-  # 버킷 목록 조회 — 워크스페이스 접두어(env:/)만
-  #   Terraform S3 백엔드는 init·plan 때 워크스페이스 목록을 "env:/" 접두어로 조회한다.
-  #   그 외 접두어(예: stacks/03-workload/)와 전체 목록은 거부된다.
-  #   ⚠ 부수 효과: 없는 객체를 GetObject/HeadObject 하면 404 가 아니라 403 이 온다
-  #     (ListBucket 이 없으면 S3 가 존재 여부를 숨긴다). 거부 증명은 정책 시뮬레이터로 한다.
+  # 버킷 목록은 워크스페이스 접두어(env:/)만 — S3 백엔드가 init·plan 때 조회한다. 그 외 목록은 거부.
+  # 부수 효과: ListBucket 이 없으면 없는 객체도 404 가 아니라 403 이 온다. 거부 확인은 정책 시뮬레이터로.
   statement {
     sid       = "StateBucketListWorkspacePrefixOnly"
     effect    = "Allow"
@@ -310,12 +263,8 @@ data "aws_iam_policy_document" "plan_permissions" {
     }
   }
 
-  # 잠금 테이블 — 무결성 다이제스트 읽기만
-  #   CI plan 은 -lock=false 로 돈다 → 잠금 항목을 쓰지 않는다 (PutItem/DeleteItem 없음).
-  #   S3 백엔드는 state 를 읽을 때 "<버킷>/<키>-md5" 다이제스트를 대조하므로 GetItem 만
-  #   필요하고, 그것도 01·02 다이제스트 항목으로만 한정한다.
-  #   Null=false: ForAllValues 는 키가 아예 없으면 참으로 판정되므로, 키가 반드시
-  #   있어야 하도록 짝으로 둔다 (AWS 권장 패턴).
+  # 잠금 테이블 — CI plan 은 -lock=false 라 쓰지 않는다. state 다이제스트(<버킷>/<키>-md5) GetItem 만, 01·02 항목으로 한정.
+  # Null=false 를 짝으로 둔다 — ForAllValues 는 키가 없으면 참으로 판정됨
   statement {
     sid       = "StateDigestReadPersistentStacks"
     effect    = "Allow"
@@ -340,12 +289,8 @@ data "aws_iam_policy_document" "plan_permissions" {
     resources = [aws_dynamodb_table.terraform_lock.arn]
   }
 
-  # 시크릿 — 의도적 부재
-  # 이전에는 secretsmanager:GetSecretValue(Okta) + kms:Decrypt(SM 경유)가 있었다.
-  #   · 03 plan 의 데이터 소스, 02 plan 의 시크릿 버전 refresh 가 이 권한을 썼다.
-  #   · 이 권한이 있는 한 PR 에 들어간 코드가 실제 현재 값을 바로 읽을 수 있다.
-  # → 03 을 CI plan 에서 빼고, 02 는 시크릿 "그릇"만 관리하게 바꿔 권한 자체를 없앴다.
-  #   다시 필요해 보이면 그 plan 을 CI 가 아니라 로컬에서 하는 게 맞다.
+  # 시크릿 — 의도적 부재. GetSecretValue·kms:Decrypt 가 있으면 PR 코드가 현재 시크릿 값을 읽을 수 있음
+  # 그래서 03 은 CI plan 에서 빼고 02 는 시크릿 그릇만 관리한다. 필요해 보이면 그 plan 은 로컬에서 한다.
 }
 
 # CI plan 이 읽을 수 있는 state — 영속 스택 중 시크릿을 품지 않는 01·02 만

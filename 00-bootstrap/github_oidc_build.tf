@@ -1,21 +1,6 @@
-# 왜 기존 plan 역할에 권한을 "추가"하지 않는가:
-#   github_actions_plan 은 이름 그대로 plan 전용(방향 A)으로 설계됐다.
-#   여기에 ECR push 를 얹으면 하나의 역할이
-#     plan(읽기) + build(레지스트리 쓰기)
-#   를 겸하게 되고, 워크플로 하나가 침해되면 두 권한이 함께 넘어간다.
-#   → 역할을 목적별로 분리한다.
-#
-# 왜 00-bootstrap 인가:
-#   OIDC provider 소유자가 여기이고, 신뢰 관계는 provider 와 한 몸이다.
-#   ECR push "정책"은 02-security 가 소유해 attach 한다
-#   (리소스 소유 스택이 그 리소스에 대한 권한을 정의한다는 원칙).
+# build 역할 — plan 역할과 분리해, 워크플로 하나가 뚫려도 읽기와 레지스트리 쓰기가 함께 넘어가지 않게 한다
 
-# 신뢰 정책 — plan 역할과 다른 점 하나
-# plan 은 PR 이벤트에서 동작해야 하므로 pull_request 를 허용한다.
-# build 는 **main 에 merge 된 뒤에만** 이미지를 밀어야 하므로
-# pull_request 를 신뢰 대상에서 제외한다.
-#   → fork/PR 에서 임의 이미지를 레지스트리에 넣는 경로를 원천 차단.
-#   → 최소권한의 "시간축"(사용하지 않는 권한을 미리 열지 않음)과 같은 원칙.
+# main 에서만 수임 — PR(포크 포함)에서 임의 이미지를 레지스트리에 넣는 경로를 막음
 data "aws_iam_policy_document" "github_assume_build" {
   statement {
     effect  = "Allow"
@@ -32,7 +17,7 @@ data "aws_iam_policy_document" "github_assume_build" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # ★ main ref 만 — pull_request 없음 (plan 역할과의 결정적 차이)
+    # main ref 만 — pull_request 없음
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
@@ -58,9 +43,7 @@ resource "aws_iam_role" "github_actions_build" {
   }
 }
 
-# ⚠ 이 역할에는 여기서 정책을 붙이지 않는다.
-#   ECR push 정책은 02-security(ECR 소유 스택)가 생성해 attach 한다.
-#   → 02 가 이 역할 ARN 을 알아야 하므로 SSM 으로 발행.
+# 정책은 여기서 붙이지 않는다 — 02 가 SSM 으로 이 ARN 을 받아 ECR push 정책을 붙임
 resource "aws_ssm_parameter" "github_build_role_arn" {
   name        = "/${var.project_name}/bootstrap/github_build_role_arn"
   description = "GitHub Actions build role ARN — consumed by 02-security to attach the ECR push policy"
