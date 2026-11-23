@@ -64,7 +64,7 @@ resource "kubernetes_network_policy_v1" "allow_dns" {
   }
 
   spec {
-    pod_selector {}  # 네임스페이스 안 파드 전부
+    pod_selector {} # 네임스페이스 안 파드 전부
     policy_types = ["Egress"]
 
     egress {
@@ -179,7 +179,7 @@ resource "kubernetes_network_policy_v1" "default_deny" {
   }
 
   spec {
-    pod_selector {}  # 네임스페이스 안 파드 전부
+    pod_selector {} # 네임스페이스 안 파드 전부
     # ingress/egress 블록을 비워 두면 전부 거부된다.
     policy_types = ["Ingress", "Egress"]
   }
@@ -200,7 +200,7 @@ resource "kubernetes_network_policy_v1" "app_default_deny" {
   }
 
   spec {
-    pod_selector {}  # 네임스페이스 안 파드 전부
+    pod_selector {} # 네임스페이스 안 파드 전부
     policy_types = ["Ingress", "Egress"]
   }
 

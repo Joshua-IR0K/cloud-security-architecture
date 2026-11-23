@@ -13,7 +13,7 @@ resource "aws_iam_role" "lb_controller" {
         }
         Action = [
           "sts:AssumeRole",
-          "sts:TagSession",  # Pod Identity는 세션 태깅이 필수다
+          "sts:TagSession", # Pod Identity는 세션 태깅이 필수다
         ]
       }
     ]

@@ -4,7 +4,7 @@
 
 resource "aws_lb_target_group" "eks" {
   #checkov:skip=CKV_AWS_378:TG HTTP 사용 — TLS 는 CloudFront·ALB 에서 종료, ALB→파드 구간은 VPC 내부 + NetworkPolicy(app 기본 차단)로 격리 (alb.tf 의 EC2 TG 와 같은 사유)
-  name        = "${var.project_name}-eks-tg"  # 대상 그룹 이름은 32자 제한(지금 24자)
+  name        = "${var.project_name}-eks-tg" # 대상 그룹 이름은 32자 제한(지금 24자)
   port        = 80
   protocol    = "HTTP"
   vpc_id      = local.vpc_id

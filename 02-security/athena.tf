@@ -2,7 +2,7 @@
 # 워크그룹 설정(결과 암호화, 쿼리당 스캔 1GB)은 사용자가 끌 수 없다. 원본 로그 버킷은 이름 규칙으로 읽기만 한다.
 # 버킷을 추가하면 00의 plan 역할 s3:ListBucket 목록에도 넣어야 한다. 빠지면 CI plan이 버킷을 없다고 보고 다시 만들려고 한다.
 
-data "aws_regions" "athena_trail" {}  # 계정에서 켜진 리전 = 멀티 리전 trail이 로그를 남기는 범위
+data "aws_regions" "athena_trail" {} # 계정에서 켜진 리전 = 멀티 리전 trail이 로그를 남기는 범위
 
 locals {
   athena_account   = data.aws_caller_identity.current.account_id
@@ -98,7 +98,7 @@ resource "aws_athena_workgroup" "security" {
   configuration {
     enforce_workgroup_configuration    = true # 사용자가 아래 설정을 끌 수 없다
     publish_cloudwatch_metrics_enabled = true
-    bytes_scanned_cutoff_per_query     = 1073741824  # 1GB. 넘으면 쿼리 취소(비용 상한)
+    bytes_scanned_cutoff_per_query     = 1073741824 # 1GB. 넘으면 쿼리 취소(비용 상한)
 
     engine_version {
       selected_engine_version = "Athena engine version 3"

@@ -188,7 +188,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {
     filter {}
 
     noncurrent_version_expiration {
-      noncurrent_days = 90  # state 이력 90일치 보관(롤백 대비)
+      noncurrent_days = 90 # state 이력 90일치 보관(롤백 대비)
     }
     abort_incomplete_multipart_upload {
       days_after_initiation = 7
@@ -199,7 +199,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {
 resource "aws_dynamodb_table" "terraform_lock" {
   #checkov:skip=CKV_AWS_119:Lock 테이블은 잠금 메타데이터(LockID)만 보관, 민감정보 없음. 기본 암호화로 충분 — CMK는 비용/복잡도 대비 효과 없음
   name         = "${var.project_name}-terraform-lock"
-  billing_mode = "PAY_PER_REQUEST"  # 온디맨드. apply할 때만 써서 사실상 무료
+  billing_mode = "PAY_PER_REQUEST" # 온디맨드. apply할 때만 써서 사실상 무료
   hash_key     = "LockID"
 
   attribute {

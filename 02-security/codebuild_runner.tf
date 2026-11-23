@@ -76,7 +76,7 @@ data "aws_iam_policy_document" "codebuild_runner" {
       "ec2:DescribeDhcpOptions",
       "ec2:DescribeVpcs",
     ]
-    resources = ["*"]  # 이 API들은 리소스 수준 제한을 지원하지 않는다
+    resources = ["*"] # 이 API들은 리소스 수준 제한을 지원하지 않는다
   }
 
   statement {

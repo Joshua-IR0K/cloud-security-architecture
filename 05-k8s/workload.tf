@@ -5,7 +5,7 @@
 locals {
   # 처음 만들 때 쓰는 기준 이미지. tag는 사람이 읽는 이름이고 실제 내용은 digest가 정한다.
   app_image = "${local.ecr_repository_url}:${var.app_image_tag}@${var.app_image_digest}"
-  app_uid   = "101"  # nginx-unprivileged의 nginx 사용자(images/s5-good/Dockerfile USER 101)
+  app_uid   = "101" # nginx-unprivileged의 nginx 사용자(images/s5-good/Dockerfile USER 101)
 }
 
 # html을 ConfigMap으로 마운트하지 않는다. 이미지 안의 /usr/share/nginx/html을 덮어버려서
@@ -21,7 +21,7 @@ resource "kubernetes_deployment_v1" "nginx" {
   }
 
   spec {
-    replicas = 2  # TG 대상 여러 개 확인용. PDB(minAvailable 1)와 짝이라 한 번에 하나만 내려간다
+    replicas = 2 # TG 대상 여러 개 확인용. PDB(minAvailable 1)와 짝이라 한 번에 하나만 내려간다
 
     # 롤아웃 중에도 Ready 파드 2개는 유지한다. 새 파드가 Ready가 돼야 기존 파드를 내린다.
     # 레플리카를 늘려도 그대로 가도록 값을 고정해 뒀다. CI 롤아웃도 같은 규칙을 따른다.
@@ -91,7 +91,7 @@ resource "kubernetes_deployment_v1" "nginx" {
 
           port {
             name           = "http"
-            container_port = 8080  # nginx-unprivileged라 1024 미만 포트 권한이 필요 없다
+            container_port = 8080 # nginx-unprivileged라 1024 미만 포트 권한이 필요 없다
           }
 
           # 컨테이너 수준 설정. PSA restricted 요구사항 + 읽기 전용 루트
@@ -196,12 +196,12 @@ resource "kubernetes_service_v1" "nginx" {
     }
 
     port {
-      port        = 80  # 서비스 포트는 80 그대로. 클러스터 안에서는 http://nginx.app으로 부른다
+      port        = 80     # 서비스 포트는 80 그대로. 클러스터 안에서는 http://nginx.app으로 부른다
       target_port = "http" # 컨테이너의 이름 붙은 포트(8080)를 가리킨다
       protocol    = "TCP"
     }
 
-    type = "ClusterIP"  # 외부 노출은 ALB(TGB)가 맡아서 LoadBalancer 타입은 필요 없다
+    type = "ClusterIP" # 외부 노출은 ALB(TGB)가 맡아서 LoadBalancer 타입은 필요 없다
   }
 }
 

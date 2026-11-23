@@ -43,7 +43,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "flow_logs" {
       sse_algorithm     = "aws:kms"
       kms_master_key_id = aws_kms_key.logs.arn
     }
-    bucket_key_enabled = true  # S3 Bucket Key로 KMS 호출 비용을 줄인다
+    bucket_key_enabled = true # S3 Bucket Key로 KMS 호출 비용을 줄인다
   }
 }
 

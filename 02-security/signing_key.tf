@@ -7,7 +7,7 @@ resource "aws_kms_key" "signing" {
   key_usage                = "SIGN_VERIFY"
   customer_master_key_spec = "ECC_NIST_P256"
   deletion_window_in_days  = 7
-  enable_key_rotation      = false  # 비대칭 키는 자동 회전을 지원하지 않는다
+  enable_key_rotation      = false # 비대칭 키는 자동 회전을 지원하지 않는다
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -79,7 +79,7 @@ data "aws_iam_policy_document" "sign_ecr_publish" {
     sid       = "EcrAuthToken"
     effect    = "Allow"
     actions   = ["ecr:GetAuthorizationToken"]
-    resources = ["*"]  # 리소스 수준 제한을 지원하지 않는다(AWS API 제약)
+    resources = ["*"] # 리소스 수준 제한을 지원하지 않는다(AWS API 제약)
   }
 
   statement {

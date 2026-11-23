@@ -4,7 +4,7 @@
 resource "aws_s3_bucket" "identity_demo" {
   # 버킷 이름은 전역에서 유일해야 해서 계정 ID를 뒤에 붙인다.
   bucket        = "${var.project_name}-s2-identity-demo-${data.aws_caller_identity.current.account_id}"
-  force_destroy = true  # 데모 객체가 남아 있어도 destroy할 수 있게(사이클마다 깔끔하게)
+  force_destroy = true # 데모 객체가 남아 있어도 destroy할 수 있게(사이클마다 깔끔하게)
 }
 
 resource "aws_s3_bucket_public_access_block" "identity_demo" {

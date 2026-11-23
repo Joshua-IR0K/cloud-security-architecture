@@ -51,7 +51,7 @@ data "aws_iam_policy_document" "github_assume" {
 resource "aws_iam_role" "github_actions_plan" {
   name                 = "${var.project_name}-github-actions-plan"
   assume_role_policy   = data.aws_iam_policy_document.github_assume.json
-  max_session_duration = 3600  # AWS 최소값(IAM Role은 3600~43200만 허용)
+  max_session_duration = 3600 # AWS 최소값(IAM Role은 3600~43200만 허용)
 
   tags = {
     Name    = "${var.project_name}-github-actions-plan"
@@ -105,7 +105,7 @@ data "aws_iam_policy_document" "plan_permissions" {
       "securityhub:ListTagsForResource",
       "securityhub:ListEnabledProductsForImport",
       "securityhub:GetEnabledStandards",
-      "config:Describe*",  # recorder·channel·status 조회(설정 이력 내용을 돌려주는 Get*는 뺐다)
+      "config:Describe*", # recorder·channel·status 조회(설정 이력 내용을 돌려주는 Get*는 뺐다)
       "config:ListTagsForResource",
       "inspector2:List*",
       "inspector2:Get*",
@@ -160,7 +160,7 @@ data "aws_iam_policy_document" "plan_permissions" {
     sid       = "SSMDescribe"
     effect    = "Allow"
     actions   = ["ssm:DescribeParameters"]
-    resources = ["*"]  # DescribeParameters는 리소스 제한을 지원하지 않는다
+    resources = ["*"] # DescribeParameters는 리소스 제한을 지원하지 않는다
   }
 
   # S3 버킷 구성 조회는 프로젝트 버킷 패턴으로만 묶는다. 객체 읽기는 state 두 파일뿐이다.
@@ -285,7 +285,7 @@ data "aws_iam_policy_document" "plan_permissions" {
   statement {
     sid       = "StateLockTableDescribe"
     effect    = "Allow"
-    actions   = ["dynamodb:DescribeTable"]  # 테이블 상태 확인(간헐 실패 방지)
+    actions   = ["dynamodb:DescribeTable"] # 테이블 상태 확인(간헐 실패 방지)
     resources = [aws_dynamodb_table.terraform_lock.arn]
   }
 

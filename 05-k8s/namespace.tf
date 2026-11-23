@@ -3,7 +3,7 @@
 
 locals {
   app_namespace = "app"
-  psa_version   = "v1.35"  # 04-eks var.kubernetes_version이랑 맞춘다
+  psa_version   = "v1.35" # 04-eks var.kubernetes_version이랑 맞춘다
 }
 
 resource "kubernetes_namespace_v1" "app" {

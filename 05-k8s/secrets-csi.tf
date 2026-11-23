@@ -62,7 +62,7 @@ resource "kubectl_manifest" "secrets_demo" {
     kind       = "SecretProviderClass"
     metadata = {
       name      = "s4-secrets-demo"
-      namespace = "default"  # 파드와 꼭 같은 네임스페이스여야 한다
+      namespace = "default" # 파드와 꼭 같은 네임스페이스여야 한다
     }
     spec = {
       provider = "aws"

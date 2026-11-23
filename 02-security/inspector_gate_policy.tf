@@ -6,7 +6,7 @@ data "aws_iam_policy_document" "inspector_gate_read" {
     sid    = "ReadScanStatusAndFindingsOnly"
     effect = "Allow"
     actions = [
-      "inspector2:ListCoverage",  # 스캔이 끝났는지 확인(비동기 대기)
+      "inspector2:ListCoverage", # 스캔이 끝났는지 확인(비동기 대기)
       "inspector2:ListFindings", # 차단 기준 평가
     ]
     resources = ["*"]
