@@ -95,7 +95,7 @@ jobs:
 
       - name: Set up Buildx
         if: steps.exists.outputs.found == 'false'
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
 
       # 베이스 이미지는 빌드 역할로 로그인해서 받는다. GitHub 러너는 IP를 여럿이 같이 써서 익명으로 받으면 한도("toomanyrequests")에 걸릴 수 있다.
       # ECR Public 토큰은 us-east-1에서만 나온다(권한은 02 ecr_push_policy.tf, 토큰 발급만 가능).
