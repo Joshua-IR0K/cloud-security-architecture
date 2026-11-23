@@ -5,7 +5,7 @@ resource "aws_subnet" "public" {
   cidr_block        = var.public_subnet_cidrs[count.index]
   availability_zone = var.availability_zones[count.index]
 
-  # 퍼블릭 서브넷이어도 자동 공인 IP는 주지 않으며, ALB는 자체 ENI, NAT는 EIP 를 사용
+  # 퍼블릭 서브넷이어도 공인 IP를 자동으로 주지 않는다. ALB는 자체 ENI, NAT는 EIP를 쓴다.
   map_public_ip_on_launch = false
 
   tags = {

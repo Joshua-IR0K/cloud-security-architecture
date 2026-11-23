@@ -10,7 +10,7 @@ resource "aws_lb" "main" {
 
   enable_deletion_protection = false
 
-  # 비정상 HTTP 헤더 차단 — 헤더 스머글링 방어 (CKV_AWS_131 대응)
+  # 비정상 HTTP 헤더를 버린다. 헤더 스머글링 방어(CKV_AWS_131 대응).
   drop_invalid_header_fields = true
 
   tags = {
@@ -111,8 +111,8 @@ resource "aws_lb_listener_rule" "oidc_auth" {
     }
   }
 
-  # EC2(blue)·EKS(green) 가중치 forward. EKS 대상 그룹을 가중치 0 으로 미리 물려 두면 빈 그룹으로 넘어가는 502 경합이 생기지 않는다.
-  # 전환은 가중치 변수로만 한다 (variables_cutover.tf)
+  # EC2(blue)·EKS(green) 가중치 forward. EKS 대상 그룹을 가중치 0으로 미리 붙여 두면 빈 그룹으로 넘어가면서 생기는 502 경합이 없다.
+  # 전환은 가중치 변수로만 한다(variables_cutover.tf).
   action {
     type = "forward"
 
@@ -127,8 +127,8 @@ resource "aws_lb_listener_rule" "oidc_auth" {
         weight = var.eks_traffic_weight
       }
 
-      # 컷오버는 명시적 weight 로만 제어 → 세션 고정 불필요.
-      # duration 은 enabled=false 여도 필수 이므로 1.
+      # 전환은 명시적인 weight로만 조절하니까 세션 고정이 필요 없다.
+      # duration은 enabled=false여도 필수라서 1로 둔다.
       stickiness {
         enabled  = false
         duration = 1
@@ -136,8 +136,8 @@ resource "aws_lb_listener_rule" "oidc_auth" {
     }
   }
 
-  # 평소엔 CloudFront 가 보내는 값 하나, 교체 중 병행 구간엔 두 슬롯 모두 받는다 (origin_verify.tf)
-  # 여러 값은 OR 로 평가된다 — 하나라도 일치하면 이 규칙(OIDC → forward)으로 간다
+  # 평소엔 CloudFront가 보내는 값 하나만, 교체 중 병행 구간엔 두 슬롯 값을 다 받는다(origin_verify.tf).
+  # 여러 값은 OR로 평가돼서 하나라도 맞으면 이 규칙(OIDC 인증 후 forward)으로 간다.
   condition {
     http_header {
       http_header_name = "X-Origin-Verify"

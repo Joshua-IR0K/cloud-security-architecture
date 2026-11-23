@@ -18,8 +18,8 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# 기본 경로(0.0.0.0/0 → NAT)는 03-workload 가 aws_route 로 추가한다.
-# 03 을 지우면 경로만 사라지고 라우트 테이블은 남는다.
+# 기본 경로(0.0.0.0/0, NAT 방향)는 03-workload가 aws_route로 추가한다.
+# 03을 지우면 경로만 사라지고 라우트 테이블은 남는다.
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
 

@@ -1,4 +1,4 @@
-# 03 의 WAF 로깅 설정이 읽음
+# 03의 WAF 로깅 설정이 읽는다.
 resource "aws_ssm_parameter" "waf_log_bucket_arn" {
   name  = "/${var.project_name}/security/waf_log_bucket_arn"
   type  = "String"
@@ -23,7 +23,7 @@ resource "aws_ssm_parameter" "guardduty_detector_id" {
   tags = { Name = "${var.project_name}-guardduty-detector-id" }
 }
 
-# 03(EC2)·04(노드)가 볼륨 암호화에 읽음
+# 03(EC2)·04(노드)가 볼륨 암호화에 읽는다.
 resource "aws_ssm_parameter" "ebs_kms_key_arn" {
   name  = "/${var.project_name}/security/ebs_kms_key_arn"
   type  = "String"
@@ -32,7 +32,7 @@ resource "aws_ssm_parameter" "ebs_kms_key_arn" {
   tags = { Name = "${var.project_name}-ebs-kms-key-arn" }
 }
 
-# 03 이 apply 때 이 ARN 으로 값을 읽어 ALB 인증 설정에 넣음
+# 03이 apply 때 이 ARN으로 값을 읽어서 ALB 인증 설정에 넣는다.
 resource "aws_ssm_parameter" "okta_secret_arn" {
   name  = "/${var.project_name}/security/okta_secret_arn"
   type  = "String"

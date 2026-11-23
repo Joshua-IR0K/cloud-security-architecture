@@ -47,7 +47,7 @@ data "aws_ssm_parameter" "acm_alb_cert_arn" {
   name = "/${var.project_name}/network/acm_alb_cert_arn"
 }
 
-# Okta 자격증명은 apply 때 Secrets Manager 에서 읽는다 — 값이 03 state 에 남아서 CI plan 역할은 03 state 를 읽지 못하게 막음
+# Okta 자격증명은 apply 때 Secrets Manager에서 읽는다. 값이 03 state에 남아서 CI plan 역할은 03 state를 못 읽게 막아 뒀다.
 data "aws_secretsmanager_secret_version" "okta" {
   secret_id = data.aws_ssm_parameter.okta_secret_arn.value
 }

@@ -27,7 +27,7 @@ provider "aws" {
   }
 }
 
-# CloudFront WAF + ACM은 us-east-1
+# CloudFront WAF와 ACM은 us-east-1
 provider "aws" {
   alias  = "us_east_1"
   region = "us-east-1"

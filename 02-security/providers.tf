@@ -23,7 +23,7 @@ provider "aws" {
   }
 }
 
-# WAF 로그 S3 버킷은 us-east-1에 생성 필요
+# WAF 로그 S3 버킷은 us-east-1에 만들어야 한다.
 provider "aws" {
   alias  = "us_east_1"
   region = "us-east-1"

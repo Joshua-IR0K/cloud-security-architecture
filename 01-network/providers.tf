@@ -23,7 +23,7 @@ provider "aws" {
   }
 }
 
-# CloudFront 인증서는 us-east-1 에서만 발급된다 (AWS 제약)
+# CloudFront 인증서는 us-east-1에서만 발급된다(AWS 제약).
 provider "aws" {
   alias  = "us_east_1"
   region = "us-east-1"

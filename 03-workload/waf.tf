@@ -141,7 +141,7 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
-  # Log4Shell(CVE-2021-44228) 등 알려진 악성 입력 (CKV_AWS_192 대응)
+  # Log4Shell(CVE-2021-44228) 같은 알려진 악성 입력(CKV_AWS_192 대응)
   rule {
     name     = "known-bad-inputs"
     priority = 6
@@ -175,7 +175,7 @@ resource "aws_wafv2_web_acl" "main" {
   }
 }
 
-# WAF 로깅 — S3 버킷은 02-security 스택에서 관리
+# WAF 로깅. S3 버킷은 02-security 스택에서 관리한다.
 resource "aws_wafv2_web_acl_logging_configuration" "main" {
   provider = aws.us_east_1
 

@@ -1,5 +1,5 @@
 # AWS 권한은 eks:DescribeCluster 하나. 쿠버네티스 권한은 EKS 접근 항목과 네임스페이스 RBAC(04·05)이 정한다.
-# CodeBuild 러너에서 돌아도 AWS 접근은 이 역할로 한다 — 러너 서비스 역할(02)은 배관만 맡음
+# CodeBuild 러너에서 돌아도 AWS 접근은 이 역할로 한다. 러너 서비스 역할(02)은 러너를 띄우는 데만 쓴다.
 
 data "aws_iam_policy_document" "github_assume_deploy" {
   statement {
@@ -17,7 +17,7 @@ data "aws_iam_policy_document" "github_assume_deploy" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # main ref 만 — PR(공개 전환 후 포크 PR 포함)은 배포 경로를 실행할 수 없음
+    # main ref만 허용한다. PR(공개 후 포크 PR 포함)로는 배포 경로를 못 돌린다.
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
@@ -43,7 +43,7 @@ resource "aws_iam_role" "github_actions_deploy" {
   }
 }
 
-# kubeconfig 생성(aws eks update-kubeconfig)에 필요한 DescribeCluster만. 클러스터 변경·노드·ECR 권한은 없음
+# kubeconfig 만들 때(aws eks update-kubeconfig) 필요한 DescribeCluster만 준다. 클러스터 변경, 노드, ECR 권한은 없다.
 data "aws_iam_policy_document" "deploy_permissions" {
   statement {
     sid       = "DescribeClusterForKubeconfig"
@@ -59,7 +59,7 @@ resource "aws_iam_role_policy" "deploy_permissions" {
   policy = data.aws_iam_policy_document.deploy_permissions.json
 }
 
-# 04-eks 가 access entry 생성에 이 ARN 을 참조한다
+# 04-eks가 접근 항목을 만들 때 이 ARN을 쓴다.
 resource "aws_ssm_parameter" "github_deploy_role_arn" {
   name        = "/${var.project_name}/bootstrap/github_deploy_role_arn"
   description = "GitHub Actions deploy role ARN — consumed by 04-eks for the EKS access entry"

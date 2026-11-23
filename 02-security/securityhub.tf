@@ -2,7 +2,7 @@ resource "aws_securityhub_account" "main" {
   auto_enable_controls = true
 }
 
-# Config 기록이 켜진 뒤에 구독해야 보안 점수가 정상 산출됨
+# Config 기록이 켜진 다음에 구독해야 보안 점수가 제대로 나온다.
 
 resource "aws_securityhub_standards_subscription" "cis" {
   standards_arn = "arn:aws:securityhub:${var.aws_region}::standards/cis-aws-foundations-benchmark/v/1.4.0"

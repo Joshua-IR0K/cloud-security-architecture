@@ -1,4 +1,4 @@
-# 레코드는 가리키는 대상(CloudFront)과 같은 세션 스택에 둔다 — 영속 스택에 두면 CloudFront 를 다시 만들 때마다 영속 스택도 다시 apply 해야 함
+# 레코드는 가리키는 대상(CloudFront)과 같은 세션 스택에 둔다. 영속 스택에 두면 CloudFront를 다시 만들 때마다 영속 스택도 다시 apply해야 한다.
 
 data "aws_route53_zone" "main" {
   name         = var.domain_name

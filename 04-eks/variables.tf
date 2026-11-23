@@ -45,8 +45,8 @@ variable "my_ip" {
   type        = string
   sensitive   = true
 
-  # 외부 응답(checkip)이 보안 통제(허용 목록)로 들어가는 지점이라 형식을 검증해 쓰레기 값을 plan 에서 막는다.
-  # 한계: 형식이 맞는 남의 IP 는 못 잡는다 — 그건 HTTPS 와 AWS 엔드포인트 신뢰에 맡김
+  # 외부 응답(checkip)이 보안 통제(허용 목록)로 들어가는 곳이라, 형식을 검증해서 이상한 값을 plan에서 막는다.
+  # 한계: 형식이 맞는 남의 IP는 못 잡는다. 그건 HTTPS와 AWS 엔드포인트 신뢰에 맡긴다.
   validation {
     condition     = can(regex("^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$", var.my_ip))
     error_message = "my_ip 가 단일 IPv4 형식이 아님 — TF_VAR_my_ip 주입 누락 또는 IP echo 엔드포인트 장애/변조 의심. allowlist 오염 방지를 위해 중단."

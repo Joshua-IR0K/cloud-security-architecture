@@ -8,14 +8,14 @@ resource "aws_iam_openid_connect_provider" "github" {
   url            = "https://token.actions.githubusercontent.com"
   client_id_list = ["sts.amazonaws.com"]
 
-  # AWS 는 GitHub OIDC 를 자체 신뢰 CA 로 검증해 이 값을 쓰지 않는다 — 단일 값이면 충분하고 인증서가 바뀌어도 끊기지 않음 (provider 5.x 필수 필드)
+  # AWS는 GitHub OIDC를 자체 신뢰 CA로 검증해서 이 값을 쓰지 않는다. 값 하나면 충분하고 인증서가 바뀌어도 안 끊긴다(provider 5.x 필수 필드).
   thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
 
   tags = {
     Name = "${var.project_name}-github-oidc"
   }
 
-  # 영속 리소스 — 실수 destroy 방지 (CI/CD 전체 중단 방지)
+  # 영속 리소스라 실수로 destroy되지 않게 막는다(지우면 CI/CD 전체가 멈춘다).
   lifecycle {
     prevent_destroy = true
   }
@@ -37,9 +37,9 @@ data "aws_iam_policy_document" "github_assume" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # pull_request 만 신뢰한다 (StringEquals). 쓰지 않는 ref 는 신뢰에서 뺐다.
-    # Environment 로 sub 를 핀하지 않는다 — 비공개+Free 에서는 보호 규칙이 없어 통제가 생기지 않는다. 공개 전환 시 environment 핀 + required reviewer.
-    # 포크 PR 은 id-token 권한이 없어 OIDC 토큰을 받지 못함
+    # pull_request만 신뢰한다(StringEquals). 안 쓰는 ref는 신뢰에서 뺐다.
+    # Environment로 sub를 고정하지 않는다. 비공개+Free 플랜에서는 보호 규칙이 없어서 고정해도 통제가 안 생긴다. 공개로 바꾸면 environment 고정과 required reviewer를 건다.
+    # 포크 PR은 id-token 권한이 없어서 OIDC 토큰을 못 받는다.
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
@@ -51,7 +51,7 @@ data "aws_iam_policy_document" "github_assume" {
 resource "aws_iam_role" "github_actions_plan" {
   name                 = "${var.project_name}-github-actions-plan"
   assume_role_policy   = data.aws_iam_policy_document.github_assume.json
-  max_session_duration = 3600 # AWS 최소값 (IAM Role은 3600~43200 범위만 허용)
+  max_session_duration = 3600  # AWS 최소값(IAM Role은 3600~43200만 허용)
 
   tags = {
     Name    = "${var.project_name}-github-actions-plan"
@@ -64,9 +64,9 @@ resource "aws_iam_role" "github_actions_plan" {
 }
 
 data "aws_iam_policy_document" "plan_permissions" {
-  # 읽기 — CI 가 plan 하는 01·02 가 실제로 쓰는 서비스만. Describe/List 는 대부분 리소스 수준 제한이 없어 "*".
-  # 조회 API 도 비밀을 돌려줄 수 있어 뺐다: cloudfront Get/ListDistributions·elb DescribeRules(오리진 헤더 값), wafv2 GetSampledRequests(요청 헤더), config Get*(설정 이력).
-  # logs 는 메타데이터와 저장 쿼리 정의 조회만 — 로그 내용(GetLogEvents·FilterLogEvents·StartQuery)은 제외하고 가드가 확인함.
+  # 읽기 권한은 CI가 plan하는 01·02가 실제로 쓰는 서비스만 준다. Describe/List는 대부분 리소스 수준 제한이 없어서 "*".
+  # 조회 API라도 비밀을 돌려줄 수 있는 건 뺐다: cloudfront Get/ListDistributions·elb DescribeRules(오리진 헤더 값), wafv2 GetSampledRequests(요청 헤더), config Get*(설정 이력).
+  # logs는 메타데이터와 저장 쿼리 정의 조회만 준다. 로그 내용(GetLogEvents·FilterLogEvents·StartQuery)은 빼고, 가드가 확인한다.
 
   statement {
     sid    = "ReadOnlyForPlan"
@@ -88,11 +88,11 @@ data "aws_iam_policy_document" "plan_permissions" {
       "kms:GetKeyPolicy",
       "kms:GetKeyRotationStatus",
       "kms:ListResourceTags",
-      # 02 의 aws_cloudwatch_log_group refresh (메타데이터만 — 내용 읽기 권한 아님)
+      # 02의 aws_cloudwatch_log_group refresh용(메타데이터만, 내용 읽기 권한은 아님)
       "logs:DescribeLogGroups",
       "logs:ListTagsForResource",
       "logs:ListTagsLogGroup",
-      # 02 의 aws_cloudwatch_query_definition refresh (저장 쿼리 정의 — 실행 권한 StartQuery 는 없음)
+      # 02의 aws_cloudwatch_query_definition refresh용(저장 쿼리 정의만, 실행 권한 StartQuery는 없음)
       "logs:DescribeQueryDefinitions",
       "cloudtrail:Describe*",
       "cloudtrail:Get*",
@@ -105,7 +105,7 @@ data "aws_iam_policy_document" "plan_permissions" {
       "securityhub:ListTagsForResource",
       "securityhub:ListEnabledProductsForImport",
       "securityhub:GetEnabledStandards",
-      "config:Describe*", # recorder·channel·status 조회 (설정 이력 내용을 돌려주는 Get* 는 제외)
+      "config:Describe*",  # recorder·channel·status 조회(설정 이력 내용을 돌려주는 Get*는 뺐다)
       "config:ListTagsForResource",
       "inspector2:List*",
       "inspector2:Get*",
@@ -119,21 +119,21 @@ data "aws_iam_policy_document" "plan_permissions" {
       "secretsmanager:ListSecrets",
       "secretsmanager:GetResourcePolicy",
       "tag:GetResources",
-      # 02-security ECR repository/lifecycle refresh
+      # 02-security ECR repository/lifecycle refresh용
       "ecr:DescribeRepositories",
       "ecr:DescribeImages",
       "ecr:GetLifecyclePolicy",
       "ecr:GetRepositoryPolicy",
       "ecr:GetRegistryScanningConfiguration",
       "ecr:ListTagsForResource",
-      # 02-security CodeBuild project/webhook refresh
+      # 02-security CodeBuild project/webhook refresh용
       "codebuild:BatchGetProjects",
       "codebuild:ListProjects"
     ]
     resources = ["*"]
   }
 
-  # 02 의 서명 공개키 조회(GetPublicKey) — 공개키라 민감하진 않음
+  # 02의 서명 공개키 조회(GetPublicKey). 공개키라 민감하지 않다.
   statement {
     sid       = "KmsGetPublicKeyForDataSource"
     effect    = "Allow"
@@ -141,7 +141,7 @@ data "aws_iam_policy_document" "plan_permissions" {
     resources = ["arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key/*"]
   }
 
-  # SSM — 프로젝트 경로만. SecureString 파라미터는 없음
+  # SSM은 프로젝트 경로만. SecureString 파라미터는 없다.
   statement {
     sid    = "SSMProjectScoped"
     effect = "Allow"
@@ -160,11 +160,11 @@ data "aws_iam_policy_document" "plan_permissions" {
     sid       = "SSMDescribe"
     effect    = "Allow"
     actions   = ["ssm:DescribeParameters"]
-    resources = ["*"] # DescribeParameters는 리소스 제한 미지원
+    resources = ["*"]  # DescribeParameters는 리소스 제한을 지원하지 않는다
   }
 
-  # S3 버킷 구성 조회 — 프로젝트 버킷 패턴으로 한정. 객체 읽기는 state 두 파일만.
-  # 이 statement 에 ListBucket 을 넣지 않는다 — state 버킷 전체 목록까지 열림(statement 는 OR 로 합쳐짐)
+  # S3 버킷 구성 조회는 프로젝트 버킷 패턴으로만 묶는다. 객체 읽기는 state 두 파일뿐이다.
+  # 이 statement에 ListBucket을 넣지 않는다. 넣으면 state 버킷 전체 목록까지 열린다(statement끼리는 OR로 합쳐진다).
   statement {
     sid    = "S3ReadForPlan"
     effect = "Allow"
@@ -192,8 +192,8 @@ data "aws_iam_policy_document" "plan_permissions" {
     ]
   }
 
-  # 02 로그 버킷 존재 확인 — aws_s3_bucket refresh 의 HeadBucket 은 s3:ListBucket 을 요구한다. 범위: 로그 버킷 4개 + Athena 결과 버킷.
-  # 없으면 plan 이 실패하지 않고 버킷을 "없음"으로 보고 재생성을 계획한다 — 에러 없이 틀린 plan.
+  # 02 로그 버킷 존재 확인. aws_s3_bucket refresh의 HeadBucket이 s3:ListBucket을 요구한다. 범위는 로그 버킷 4개와 Athena 결과 버킷.
+  # 이게 없으면 plan이 실패하지 않고 버킷을 "없음"으로 보고 다시 만들려고 한다. 에러 없이 틀린 plan이 나온다.
   statement {
     sid     = "LogBucketExistenceForPlan"
     effect  = "Allow"
@@ -207,8 +207,8 @@ data "aws_iam_policy_document" "plan_permissions" {
     ]
   }
 
-  # Athena 조사 계층 refresh — provider 5.100.0 이 실제로 부르는 Get* 만 (Glue 데이터베이스·테이블, Athena 워크그룹·저장 쿼리).
-  # 쿼리 실행·결과 조회·결과 버킷 GetObject 는 없다 — 가드가 확인함
+  # Athena 조사 계층 refresh용. provider 5.100.0이 실제로 부르는 Get*만 준다(Glue 데이터베이스·테이블, Athena 워크그룹·저장 쿼리).
+  # 쿼리 실행, 결과 조회, 결과 버킷 GetObject는 없다. 가드가 확인한다.
   statement {
     sid    = "AthenaCatalogMetadataForPlan"
     effect = "Allow"
@@ -238,10 +238,10 @@ data "aws_iam_policy_document" "plan_permissions" {
     ]
   }
 
-  # State — 01·02 만 읽는다. 03 은 Okta 시크릿과 Origin 헤더 값이 들어 있어 차단(plan 은 로컬에서만),
-  # 04·05 는 임시 스택이라 CI plan 대상이 아니다. 00 은 로컬 state
+  # State는 01·02만 읽는다. 03은 Okta 시크릿과 Origin 헤더 값이 들어 있어서 막았고(plan은 로컬에서만),
+  # 04·05는 임시 스택이라 CI plan 대상이 아니다. 00은 로컬 state다.
 
-  # State 객체 읽기 — 01·02 두 파일만
+  # State 객체 읽기. 01·02 두 파일만
   statement {
     sid       = "StateObjectReadPersistentStacks"
     effect    = "Allow"
@@ -249,8 +249,8 @@ data "aws_iam_policy_document" "plan_permissions" {
     resources = [for k in local.plan_state_keys : "${aws_s3_bucket.terraform_state.arn}/${k}"]
   }
 
-  # 버킷 목록은 워크스페이스 접두어(env:/)만 — S3 백엔드가 init·plan 때 조회한다. 그 외 목록은 거부.
-  # 부수 효과: ListBucket 이 없으면 없는 객체도 404 가 아니라 403 이 온다. 거부 확인은 정책 시뮬레이터로.
+  # 버킷 목록은 워크스페이스 접두어(env:/)만 연다. S3 백엔드가 init·plan 때 조회한다. 그 외 목록은 거부.
+  # 부작용: ListBucket이 없으면 없는 객체도 404가 아니라 403이 온다. 거부 확인은 정책 시뮬레이터로 한다.
   statement {
     sid       = "StateBucketListWorkspacePrefixOnly"
     effect    = "Allow"
@@ -263,8 +263,8 @@ data "aws_iam_policy_document" "plan_permissions" {
     }
   }
 
-  # 잠금 테이블 — CI plan 은 -lock=false 라 쓰지 않는다. state 다이제스트(<버킷>/<키>-md5) GetItem 만, 01·02 항목으로 한정.
-  # Null=false 를 짝으로 둔다 — ForAllValues 는 키가 없으면 참으로 판정됨
+  # 잠금 테이블. CI plan은 -lock=false라 쓰지 않는다. state 다이제스트(<버킷>/<키>-md5) GetItem만, 01·02 항목으로 묶는다.
+  # Null=false를 짝으로 둔다. ForAllValues는 키가 없으면 참으로 판정하기 때문이다.
   statement {
     sid       = "StateDigestReadPersistentStacks"
     effect    = "Allow"
@@ -285,15 +285,15 @@ data "aws_iam_policy_document" "plan_permissions" {
   statement {
     sid       = "StateLockTableDescribe"
     effect    = "Allow"
-    actions   = ["dynamodb:DescribeTable"] # 테이블 상태 확인 (간헐 실패 방지)
+    actions   = ["dynamodb:DescribeTable"]  # 테이블 상태 확인(간헐 실패 방지)
     resources = [aws_dynamodb_table.terraform_lock.arn]
   }
 
-  # 시크릿 — 의도적 부재. GetSecretValue·kms:Decrypt 가 있으면 PR 코드가 현재 시크릿 값을 읽을 수 있음
-  # 그래서 03 은 CI plan 에서 빼고 02 는 시크릿 그릇만 관리한다. 필요해 보이면 그 plan 은 로컬에서 한다.
+  # 시크릿 권한은 일부러 안 줬다. GetSecretValue·kms:Decrypt가 있으면 PR 코드가 지금 시크릿 값을 읽을 수 있다.
+  # 그래서 03은 CI plan에서 빼고, 02는 시크릿 그릇만 관리한다. 필요해 보이면 그 plan은 로컬에서 한다.
 }
 
-# CI plan 이 읽을 수 있는 state — 영속 스택 중 시크릿을 품지 않는 01·02 만
+# CI plan이 읽을 수 있는 state. 영속 스택 중 시크릿이 없는 01·02만
 locals {
   plan_state_keys = [
     "stacks/01-network/terraform.tfstate",

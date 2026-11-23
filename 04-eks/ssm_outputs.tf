@@ -1,4 +1,4 @@
-# 클러스터 이름만 발행해 둔다 — 05 스택은 이 이름으로 endpoint랑 CA를 직접 조회한다.
+# 클러스터 이름만 발행해 둔다. 05 스택은 이 이름으로 endpoint와 CA를 직접 조회한다.
 # CA는 SSM Standard 4KB 한도에 간당간당하고, 세션마다 바뀌는 endpoint도 API로 받아오면 늘 최신 값이 유지된다.
 
 resource "aws_ssm_parameter" "cluster_name" {

@@ -1,4 +1,4 @@
-# EKS 대상 그룹 ARN 만 발행한다 — ALB SG ID 는 소유자인 01 이 이미 발행하므로 04 가 01 스택에서 읽어야 함
+# EKS 대상 그룹 ARN만 발행한다. ALB SG ID는 01이 이미 발행해서 04가 01 쪽에서 읽어야 한다.
 
 resource "aws_ssm_parameter" "eks_target_group_arn" {
   name  = "/${var.project_name}/workload/eks_target_group_arn"

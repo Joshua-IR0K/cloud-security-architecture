@@ -1,4 +1,4 @@
-# 여기 남은 것은 AWS API 로 확인하는 것 + 05 가 참조할 식별자.
+# 여기 남긴 건 AWS API로 확인하는 것과 05가 참조할 식별자다.
 
 output "cluster_name" {
   description = "EKS 클러스터 이름"
@@ -30,7 +30,7 @@ output "s2_node_role_policies" {
   value       = "aws iam list-attached-role-policies --role-name ${module.eks.eks_managed_node_groups["default"].iam_role_name} --query \"AttachedPolicies[].PolicyName\""
 }
 
-# 시크릿 데모 (AWS 쪽)
+# 시크릿 데모(AWS 쪽)
 
 output "s4_secret_arn" {
   description = "S4 데모 시크릿 ARN — 05-k8s SecretProviderClass 가 참조"

@@ -1,5 +1,5 @@
-# 관리형 접근 정책을 붙이지 않는다 — ClusterAdmin 은 과하고, Edit 는 Secret·SA·NetworkPolicy·exec 까지 포함한다.
-# 접근 항목은 쿠버네티스 그룹에만 매핑하고, 실제 권한은 05 의 Role/RoleBinding 이 정한다.
+# 관리형 접근 정책은 안 붙인다. ClusterAdmin은 과하고, Edit는 Secret·SA·NetworkPolicy·exec까지 들어 있다.
+# 접근 항목은 쿠버네티스 그룹에만 매핑하고, 실제 권한은 05의 Role/RoleBinding이 정한다.
 
 data "aws_ssm_parameter" "github_deploy_role_arn" {
   name = "/${var.project_name}/bootstrap/github_deploy_role_arn"
@@ -10,14 +10,14 @@ resource "aws_eks_access_entry" "ci_deployer" {
   principal_arn = nonsensitive(data.aws_ssm_parameter.github_deploy_role_arn.value)
   type          = "STANDARD"
 
-  # 이 그룹 이름이 05-k8s 의 RoleBinding subject 와 일치해야 한다 (크로스스택 계약)
+  # 이 그룹 이름이 05-k8s의 RoleBinding subject와 같아야 한다(스택 간 약속).
   kubernetes_groups = ["ci-deployer"]
 
   tags = { Name = "${var.project_name}-ci-deployer-access-entry" }
 }
 
-# CodeBuild 러너 → EKS API(443). 프라이빗 서브넷에 있다고 API 에 닿지는 않아 클러스터 SG 에 러너 SG 를 허용해야 한다.
-# 러너 SG(02)가 있어야 성립하는 규칙이라 변수로 켠다 — 꺼져 있으면 CI 배포가 EKS API 에 닿지 못한다.
+# CodeBuild 러너에서 EKS API(443)로. 프라이빗 서브넷에 있다고 API에 닿는 건 아니라서 클러스터 SG에 러너 SG를 허용해야 한다.
+# 러너 SG(02)가 있어야 되는 규칙이라 변수로 켠다. 꺼져 있으면 CI 배포가 EKS API에 못 닿는다.
 variable "ci_runner_ingress_enabled" {
   description = <<-EOT
     CodeBuild 배포 러너 → EKS API(443) 인바운드 허용 여부.
@@ -46,4 +46,4 @@ resource "aws_vpc_security_group_ingress_rule" "ci_runner_to_cluster_api" {
   tags = { Name = "${var.project_name}-ci-runner-to-eks-api" }
 }
 
-# 퍼블릭 엔드포인트 허용 목록은 건드리지 않는다 — 러너는 VPC 안이라 프라이빗 엔드포인트로 간다
+# 퍼블릭 엔드포인트 허용 목록은 안 건드린다. 러너는 VPC 안이라 프라이빗 엔드포인트로 간다.

@@ -8,14 +8,14 @@ resource "aws_sns_topic" "security_alerts" {
   }
 }
 
-# 이메일 구독 — apply 후 이메일 인증 링크를 클릭해야 활성화됨
+# 이메일 구독. apply 후 이메일 인증 링크를 눌러야 켜진다.
 resource "aws_sns_topic_subscription" "email" {
   topic_arn = aws_sns_topic.security_alerts.arn
   protocol  = "email"
   endpoint  = var.alert_email
 }
 
-# GuardDuty Finding → SNS (심각도 4 이상, Medium 이상)
+# GuardDuty Finding을 SNS로 보낸다(심각도 4 이상, Medium 이상).
 resource "aws_cloudwatch_event_rule" "guardduty_alert" {
   name        = "${var.project_name}-guardduty-medium-high"
   description = "GuardDuty findings with severity Medium or higher"
@@ -54,7 +54,7 @@ resource "aws_cloudwatch_event_target" "guardduty_to_sns" {
   }
 }
 
-# Security Hub Finding → SNS (Critical/High)
+# Security Hub Finding을 SNS로 보낸다(Critical/High).
 resource "aws_cloudwatch_event_rule" "securityhub_alert" {
   name        = "${var.project_name}-securityhub-critical-high"
   description = "Security Hub findings with CRITICAL or HIGH severity"

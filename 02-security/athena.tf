@@ -1,20 +1,20 @@
-# 로그 조사용 Athena. 파티션 프로젝션이라 크롤러 없이 S3 경로 규칙으로 파티션을 계산한다 (상시 비용 0).
+# 로그 조사용 Athena. 파티션 프로젝션이라 크롤러 없이 S3 경로 규칙으로 파티션을 계산한다(상시 비용 0).
 # 워크그룹 설정(결과 암호화, 쿼리당 스캔 1GB)은 사용자가 끌 수 없다. 원본 로그 버킷은 이름 규칙으로 읽기만 한다.
-# 버킷을 추가하면 00 의 plan 역할 s3:ListBucket 목록에도 넣어야 한다 — 빠지면 CI plan 이 버킷을 없다고 보고 재생성을 계획한다.
+# 버킷을 추가하면 00의 plan 역할 s3:ListBucket 목록에도 넣어야 한다. 빠지면 CI plan이 버킷을 없다고 보고 다시 만들려고 한다.
 
-data "aws_regions" "athena_trail" {} # 계정에서 활성화된 리전 = 멀티 리전 trail 이 로그를 남기는 범위
+data "aws_regions" "athena_trail" {}  # 계정에서 켜진 리전 = 멀티 리전 trail이 로그를 남기는 범위
 
 locals {
   athena_account   = data.aws_caller_identity.current.account_id
   athena_region    = data.aws_region.current.name
   athena_workgroup = "${var.project_name}-security"
 
-  # 원본 로그 버킷 (02) — 이름 규칙
+  # 원본 로그 버킷(02). 이름 규칙
   athena_cloudtrail_bucket = "${var.project_name}-cloudtrail-${local.athena_account}"
   athena_flow_logs_bucket  = "${var.project_name}-flow-logs-${local.athena_account}"
   athena_waf_logs_bucket   = "aws-waf-logs-${var.project_name}-${local.athena_account}"
 
-  # 03 이 만드는 CloudFront 범위 Web ACL 이름 — WAF 로그 경로에 들어간다
+  # 03이 만드는 CloudFront 범위 Web ACL 이름. WAF 로그 경로에 들어간다.
   athena_waf_acl_name = "${var.project_name}-waf-acl"
 }
 
@@ -98,7 +98,7 @@ resource "aws_athena_workgroup" "security" {
   configuration {
     enforce_workgroup_configuration    = true # 사용자가 아래 설정을 끌 수 없다
     publish_cloudwatch_metrics_enabled = true
-    bytes_scanned_cutoff_per_query     = 1073741824 # 1GB — 넘으면 쿼리 취소 (비용 상한)
+    bytes_scanned_cutoff_per_query     = 1073741824  # 1GB. 넘으면 쿼리 취소(비용 상한)
 
     engine_version {
       selected_engine_version = "Athena engine version 3"
@@ -123,9 +123,9 @@ resource "aws_glue_catalog_database" "security_logs" {
   description = "Security log tables (partition projection, no crawler)"
 }
 
-# ① CloudTrail — 멀티 리전 trail, 접두어 없음
-#   경로: AWSLogs/<계정>/CloudTrail/<리전>/<yyyy>/<MM>/<dd>/   (CloudTrail-Digest/ 는 제외)
-#   컬럼은 AWS 문서의 CloudTrail 테이블 정의를 따른다 (requestparameters 등은 JSON 문자열)
+# ① CloudTrail. 멀티 리전 trail, 접두어 없음
+#   경로: AWSLogs/<계정>/CloudTrail/<리전>/<yyyy>/<MM>/<dd>/   (CloudTrail-Digest/는 제외)
+#   컬럼은 AWS 문서의 CloudTrail 테이블 정의를 따른다(requestparameters 등은 JSON 문자열).
 locals {
   athena_cloudtrail_columns = [
     { name = "eventversion", type = "string" },
@@ -203,10 +203,10 @@ resource "aws_glue_catalog_table" "cloudtrail" {
   }
 }
 
-# ② VPC Flow Logs — Parquet, Hive 호환 경로, 시간 단위 파티션
+# ② VPC Flow Logs. Parquet, Hive 호환 경로, 시간 단위 파티션
 #   경로: AWSLogs/aws-account-id=<계정>/aws-service=vpcflowlogs/aws-region=<리전>/year=/month=/day=/hour=/
-#   컬럼 타입은 AWS 문서의 Parquet 예시와 같다 (Parquet 은 타입이 어긋나면 읽기 실패).
-#   로그 형식에 없는 필드는 NULL 로 읽힌다 (Parquet 은 이름으로 매칭).
+#   컬럼 타입은 AWS 문서의 Parquet 예시와 같다(Parquet은 타입이 어긋나면 읽기가 실패한다).
+#   로그 형식에 없는 필드는 NULL로 읽힌다(Parquet은 이름으로 맞춘다).
 locals {
   athena_flow_log_columns = [
     { name = "version", type = "int" },
@@ -246,7 +246,7 @@ resource "aws_glue_catalog_table" "vpc_flow_logs" {
   table_type    = "EXTERNAL_TABLE"
   description   = "VPC Flow Logs (Parquet, hourly Hive-compatible partitions)"
 
-  # 정수 프로젝션 + 2자리 0 채움 — AWS 문서의 Parquet 예시(hour 00~23)와 같은 방식
+  # 정수 프로젝션 + 2자리 0 채움. AWS 문서의 Parquet 예시(hour 00~23)와 같은 방식
   parameters = {
     "EXTERNAL"                  = "TRUE"
     "projection.enabled"        = "true"
@@ -303,9 +303,9 @@ resource "aws_glue_catalog_table" "vpc_flow_logs" {
   }
 }
 
-# ③ WAF — CloudFront 범위 Web ACL, JSON(gzip), 분 단위 경로
+# ③ WAF. CloudFront 범위 Web ACL, JSON(gzip), 분 단위 경로
 #   경로: AWSLogs/<계정>/WAFLogs/cloudfront/<web-acl>/<yyyy>/<MM>/<dd>/<HH>/<mm>/
-#   조사에 쓰는 필드만 정의한다 (JSON SerDe 는 정의하지 않은 필드를 무시한다)
+#   조사에 쓰는 필드만 정의한다(JSON SerDe는 정의 안 한 필드를 무시한다).
 locals {
   athena_waf_columns = [
     { name = "timestamp", type = "bigint" },
@@ -365,8 +365,8 @@ resource "aws_glue_catalog_table" "waf_logs" {
   }
 }
 
-# 저장 쿼리 5개. 콘솔에서 이 워크그룹을 고른 뒤 Saved queries 에서 실행하고, ? 자리 값은 실행할 때 넣는다 (문자열은 작은따옴표, UTC).
-# 테이블은 security_logs.<table> 처럼 DB 이름까지 쓴다 — 콘솔은 왼쪽에서 고른 DB(기본 default)로 실행해 TABLE_NOT_FOUND 가 난다.
+# 저장 쿼리 5개. 콘솔에서 이 워크그룹을 고른 뒤 Saved queries에서 실행하고, ? 자리 값은 실행할 때 넣는다(문자열은 작은따옴표, UTC).
+# 테이블은 security_logs.<table>처럼 DB 이름까지 쓴다. 콘솔은 왼쪽에서 고른 DB(기본 default)로 실행해서 TABLE_NOT_FOUND가 난다.
 locals {
   athena_named_queries = {
     "01-waf-requests-by-ip" = {
@@ -518,7 +518,7 @@ resource "aws_athena_named_query" "investigation" {
   workgroup   = aws_athena_workgroup.security.name
   database    = aws_glue_catalog_database.security_logs.name
 
-  # 줄바꿈 정규화 — heredoc 은 CR 을 보존하고 query 는 바뀌면 재생성이라, Windows(CRLF)에서 apply 하면 CI plan 이 저장 쿼리 교체를 계획한다.
-  # 끝 줄바꿈도 잘라 서비스 쪽 정규화에 흔들리지 않게 한다.
+  # 줄바꿈 정규화. heredoc은 CR을 그대로 두고 query는 바뀌면 다시 만들어져서, Windows(CRLF)에서 apply하면 CI plan이 저장 쿼리 교체를 계획한다.
+  # 끝 줄바꿈도 잘라서 서비스 쪽 정규화에 흔들리지 않게 한다.
   query = trimspace(replace(each.value.query, "\r", ""))
 }

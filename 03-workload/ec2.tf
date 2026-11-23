@@ -53,7 +53,7 @@ resource "aws_instance" "web_test" {
   vpc_security_group_ids = [local.app_sg_id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_ssm.name
 
-  # EBS 최적화 명시 (t3는 기본 활성이나 명시적 선언 — CKV_AWS_135 대응)
+  # EBS 최적화를 명시한다(t3는 기본으로 켜져 있지만 CKV_AWS_135 때문에 적어 둔다).
   ebs_optimized = true
 
   metadata_options {

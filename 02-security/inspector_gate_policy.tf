@@ -1,20 +1,20 @@
-# 배포 시점 Inspector 검사용 읽기 권한 (build 역할). 현재 워크플로에는 연결하지 않음
-# inspector2 List* 는 리소스 수준 제한을 지원하지 않아 resources = "*"
+# 배포 시점 Inspector 검사용 읽기 권한(build 역할). 지금 워크플로에는 연결하지 않았다.
+# inspector2 List*는 리소스 수준 제한을 지원하지 않아서 resources = "*".
 
 data "aws_iam_policy_document" "inspector_gate_read" {
   statement {
     sid    = "ReadScanStatusAndFindingsOnly"
     effect = "Allow"
     actions = [
-      "inspector2:ListCoverage", # 스캔 완료 여부 (비동기 대기)
+      "inspector2:ListCoverage",  # 스캔이 끝났는지 확인(비동기 대기)
       "inspector2:ListFindings", # 차단 기준 평가
     ]
     resources = ["*"]
   }
 
-  # 의도적 부재:
-  #   inspector2:CreateFilter / UpdateFilter  — suppression 으로 finding 숨기기 차단
-  #   inspector2:Disable / UpdateConfiguration — 스캔 자체를 끄는 경로 차단
+  # 일부러 안 준 권한:
+  #   inspector2:CreateFilter / UpdateFilter: suppression으로 finding을 숨기지 못하게
+  #   inspector2:Disable / UpdateConfiguration: 스캔 자체를 끄지 못하게
 }
 
 resource "aws_iam_policy" "inspector_gate_read" {

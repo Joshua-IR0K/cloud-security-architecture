@@ -22,7 +22,7 @@ variable "alert_email" {
   default     = "zeroone2930@joshua-devsecops.com"
 }
 
-# CodeBuild 러너 입력 — 기본값이 있어 -var 없이 apply 로 완결된다
+# CodeBuild 러너 입력. 기본값이 있어서 -var 없이 apply만 하면 된다.
 
 variable "github_repo_url" {
   description = "GitHub 저장소 HTTPS URL (CodeBuild source location — 러너 모드에선 형식상 필요)"

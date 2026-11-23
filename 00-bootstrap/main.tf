@@ -85,8 +85,8 @@ resource "aws_s3_bucket_public_access_block" "terraform_state" {
   restrict_public_buckets = true
 }
 
-# state 버킷 액세스 로그 — CloudTrail(02)이 생기기 전 구간(00·01 프로비저닝)의 state 접근도 남김
-# 로그는 별도 버킷에 쓴다 — 같은 버킷에 쓰면 로그가 다시 로그를 만듬
+# state 버킷 액세스 로그. CloudTrail(02)이 생기기 전(00·01 프로비저닝 중)의 state 접근도 남긴다.
+# 로그는 다른 버킷에 쓴다. 같은 버킷에 쓰면 로그가 또 로그를 만든다.
 
 resource "aws_s3_bucket" "terraform_state_log" {
   #checkov:skip=CKV_AWS_145:SSE-S3 사용 — state 버킷을 CMK 로 바꿀 때 함께 처리
@@ -110,7 +110,7 @@ resource "aws_s3_bucket_ownership_controls" "terraform_state_log" {
   }
 }
 
-# 로그 버킷도 state 버킷과 같은 보안 기준 — 더 약하면 우회 경로가 됨
+# 로그 버킷도 state 버킷과 같은 보안 기준을 쓴다. 더 약하면 거기가 우회 경로가 된다.
 resource "aws_s3_bucket_public_access_block" "terraform_state_log" {
   bucket = aws_s3_bucket.terraform_state_log.id
 
@@ -138,8 +138,8 @@ resource "aws_s3_bucket_versioning" "terraform_state_log" {
   }
 }
 
-# 로그 버킷 라이프사이클 — 액세스 로그는 무한 축적 방지
-# (state 버킷과 달리 로그는 만료시켜도 무방)
+# 로그 버킷 라이프사이클. 액세스 로그가 끝없이 쌓이지 않게 한다.
+# (state 버킷과 달리 로그는 만료시켜도 괜찮다)
 resource "aws_s3_bucket_lifecycle_configuration" "terraform_state_log" {
   bucket = aws_s3_bucket.terraform_state_log.id
 
@@ -174,11 +174,11 @@ resource "aws_s3_bucket_logging" "terraform_state" {
   target_bucket = aws_s3_bucket.terraform_state_log.id
   target_prefix = "state-access-logs/"
 
-  # logging 리소스는 ownership_controls 설정 이후에 생성되어야 함
+  # logging 리소스는 ownership_controls 설정 다음에 만들어져야 한다.
   depends_on = [aws_s3_bucket_ownership_controls.terraform_state_log]
 }
 
-# state 라이프사이클 — 현재 state는 절대 만료시키지 않음. 구버전만 정리
+# state 라이프사이클. 현재 state는 절대 만료시키지 않고 구버전만 정리한다.
 resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
 
@@ -188,7 +188,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {
     filter {}
 
     noncurrent_version_expiration {
-      noncurrent_days = 90 # 90일치 state 이력 보관 (롤백 대비)
+      noncurrent_days = 90  # state 이력 90일치 보관(롤백 대비)
     }
     abort_incomplete_multipart_upload {
       days_after_initiation = 7
@@ -199,7 +199,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {
 resource "aws_dynamodb_table" "terraform_lock" {
   #checkov:skip=CKV_AWS_119:Lock 테이블은 잠금 메타데이터(LockID)만 보관, 민감정보 없음. 기본 암호화로 충분 — CMK는 비용/복잡도 대비 효과 없음
   name         = "${var.project_name}-terraform-lock"
-  billing_mode = "PAY_PER_REQUEST" # 온디맨드 — apply 시에만 사용, 사실상 무료
+  billing_mode = "PAY_PER_REQUEST"  # 온디맨드. apply할 때만 써서 사실상 무료
   hash_key     = "LockID"
 
   attribute {

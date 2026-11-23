@@ -43,9 +43,9 @@ resource "aws_security_group_rule" "alb_to_app" {
   description              = "To App instances on app port"
 }
 
-# ALB → EKS 파드(8080). 노드가 APP SG 를 함께 달고 있어(04 eks.tf) 파드 IP 로 가는 트래픽도 이 규칙을 탄다.
-# 없으면 타깃 등록은 되지만 헬스체크가 Target.Timeout. 80 과 범위로 묶지 않는다 — 사이 포트가 전부 열린다.
-# 노드 SG 쪽 인바운드는 LB Controller 가 TargetGroupBinding 으로 연다 (05 workload.tf).
+# ALB에서 EKS 파드(8080)로. 노드가 APP SG도 달고 있어서(04 eks.tf) 파드 IP로 가는 트래픽도 이 규칙을 탄다.
+# 이게 없으면 타깃 등록은 돼도 헬스체크가 Target.Timeout이 난다. 80과 범위로 묶지 않는다. 묶으면 사이 포트가 전부 열린다.
+# 노드 SG 쪽 인바운드는 LB Controller가 TargetGroupBinding으로 연다(05 workload.tf).
 resource "aws_security_group_rule" "alb_to_eks_pods" {
   type                     = "egress"
   from_port                = var.eks_pod_port
@@ -56,7 +56,7 @@ resource "aws_security_group_rule" "alb_to_eks_pods" {
   description              = "To EKS pods (nginx-unprivileged) on pod port"
 }
 
-# ALB 가 OIDC 인증 중 Okta 토큰 엔드포인트를 직접 호출 (443)
+# ALB가 OIDC 인증 중에 Okta 토큰 엔드포인트를 직접 부른다(443).
 resource "aws_security_group_rule" "alb_https_out" {
   type              = "egress"
   from_port         = 443

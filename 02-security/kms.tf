@@ -1,6 +1,6 @@
 data "aws_region" "current" {}
 
-# 로그 키 — CloudTrail·Config·Flow Logs 버킷, SNS 토픽, Athena 결과, EKS 감사 로그 그룹 (WAF 로그 버킷은 us-east-1 이라 제외)
+# 로그 키. CloudTrail·Config·Flow Logs 버킷, SNS 토픽, Athena 결과, EKS 감사 로그 그룹(WAF 로그 버킷은 us-east-1이라 제외)
 resource "aws_kms_key" "logs" {
   description             = "${var.project_name} - S3 log buckets encryption"
   deletion_window_in_days = 7
@@ -56,7 +56,7 @@ resource "aws_kms_key" "logs" {
         Resource = "*"
       },
       {
-        # 없으면 CMK 를 건 SNS 토픽으로 EventBridge 알림이 조용히 실패
+        # 없으면 CMK를 건 SNS 토픽으로 가는 EventBridge 알림이 조용히 실패한다.
         Sid    = "AllowEventBridgeForSNS"
         Effect = "Allow"
         Principal = {
@@ -69,7 +69,7 @@ resource "aws_kms_key" "logs" {
         Resource = "*"
       },
       {
-        # CloudWatch Logs 는 리전 서비스 주체(logs.<region>)로 키를 쓴다. 암호화 컨텍스트(aws:logs:arn)로 EKS 감사 로그 그룹 하나에만 한정
+        # CloudWatch Logs는 리전 서비스 주체(logs.<region>)로 키를 쓴다. 암호화 컨텍스트(aws:logs:arn)로 EKS 감사 로그 그룹 하나에만 묶는다.
         Sid    = "AllowCloudWatchLogsForEksControlPlane"
         Effect = "Allow"
         Principal = {
@@ -103,7 +103,7 @@ resource "aws_kms_alias" "logs" {
   target_key_id = aws_kms_key.logs.key_id
 }
 
-# 시크릿 키 — Secrets Manager (Okta 자격증명)
+# 시크릿 키. Secrets Manager(Okta 자격증명)
 resource "aws_kms_key" "secrets" {
   description             = "${var.project_name} - Secrets Manager encryption"
   deletion_window_in_days = 7
@@ -122,7 +122,7 @@ resource "aws_kms_key" "secrets" {
         Resource = "*"
       },
       {
-        # Secrets Manager 경유로만 사용 (ViaService)
+        # Secrets Manager를 거칠 때만 쓴다(ViaService).
         Sid    = "AllowSecretsManagerUse"
         Effect = "Allow"
         Principal = {
@@ -155,7 +155,7 @@ resource "aws_kms_alias" "secrets" {
   target_key_id = aws_kms_key.secrets.key_id
 }
 
-# EBS 키 — EC2·EKS 노드 볼륨
+# EBS 키. EC2·EKS 노드 볼륨
 resource "aws_kms_key" "ebs" {
   description             = "${var.project_name} - EBS volume encryption"
   deletion_window_in_days = 7
@@ -193,7 +193,7 @@ resource "aws_kms_key" "ebs" {
         }
       },
       {
-        # 노드 인스턴스를 띄우는 주체는 AWS 관리 ASG 의 SLR 이다. SLR 에는 IAM 정책을 붙일 수 없어 키 정책에 직접 명시한다 (asg_slr.tf)
+        # 노드 인스턴스를 띄우는 건 AWS 관리 ASG의 SLR이다. SLR에는 IAM 정책을 붙일 수 없어서 키 정책에 직접 적는다(asg_slr.tf).
         Sid    = "AllowASGServiceLinkedRoleUseOfEbsKey"
         Effect = "Allow"
         Principal = {
@@ -209,7 +209,7 @@ resource "aws_kms_key" "ebs" {
         Resource = "*"
       },
       {
-        # grant 생성 — AWS 리소스(EBS) 연동 grant 로만 제한 (최소권한)
+        # grant 생성. AWS 리소스(EBS) 연동 grant로만 묶는다(최소 권한).
         Sid    = "AllowASGServiceLinkedRoleGrants"
         Effect = "Allow"
         Principal = {

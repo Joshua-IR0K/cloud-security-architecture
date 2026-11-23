@@ -1,6 +1,6 @@
-# EKS 감사 로그 저장 쿼리 2개 (Logs Insights): app 네임스페이스의 PSA 위반·거부, CI 배포 신원의 API 호출 전부.
-# Logs Insights 는 JSON 필드를 200개까지만 자동 추출해 annotations 가 비어 보일 수 있다 —
-# 필터는 앞쪽 필드(verb·user·objectRef·responseStatus)와 @message 검색만 쓴다
+# EKS 감사 로그 저장 쿼리 2개(Logs Insights): app 네임스페이스의 PSA 위반·거부, CI 배포 자격의 API 호출 전부.
+# Logs Insights는 JSON 필드를 200개까지만 자동 추출해서 annotations가 비어 보일 수 있다.
+# 그래서 필터는 앞쪽 필드(verb·user·objectRef·responseStatus)와 @message 검색만 쓴다.
 
 locals {
   eks_audit_queries = {
@@ -30,10 +30,10 @@ locals {
 resource "aws_cloudwatch_query_definition" "eks_audit" {
   for_each = local.eks_audit_queries
 
-  # 슬래시는 콘솔의 저장 쿼리 목록에서 폴더가 된다 — devsecops-project / eks-audit / 01-…
+  # 슬래시는 콘솔 저장 쿼리 목록에서 폴더가 된다(devsecops-project / eks-audit / 01-…).
   name            = "${var.project_name}/eks-audit/${each.key}"
   log_group_names = [aws_cloudwatch_log_group.eks_control_plane.name]
 
-  # 줄바꿈 정규화 — athena.tf 와 같은 이유.
+  # 줄바꿈 정규화. athena.tf와 같은 이유다.
   query_string = trimspace(replace(each.value.query, "\r", ""))
 }

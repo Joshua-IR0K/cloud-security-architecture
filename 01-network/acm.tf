@@ -1,4 +1,4 @@
-# 영속 스택에 둔다 — 세션 스택(03)에 두면 destroy·apply 때마다 재발급과 DNS 검증 대기가 반복된다.
+# 영속 스택에 둔다. 세션 스택(03)에 두면 destroy·apply할 때마다 재발급하고 DNS 검증을 또 기다려야 한다.
 
 data "aws_route53_zone" "main" {
   name         = var.domain_name
@@ -37,7 +37,7 @@ resource "aws_acm_certificate" "alb" {
   }
 }
 
-# 두 인증서가 같은 도메인이라 검증 레코드가 겹친다 — 합쳐서 한 번만 만든다.
+# 두 인증서가 같은 도메인이라 검증 레코드가 겹친다. 합쳐서 한 번만 만든다.
 locals {
   cert_validation_options = merge(
     {

@@ -27,7 +27,7 @@ resource "aws_cloudfront_distribution" "main" {
       origin_keepalive_timeout = 5
     }
 
-    # ALB 직접 접근 차단용 비밀 헤더 — 지금 활성인 슬롯 값 (origin_verify.tf)
+    # ALB 직접 접근을 막는 비밀 헤더. 지금 활성인 슬롯 값(origin_verify.tf)
     custom_header {
       name  = "X-Origin-Verify"
       value = local.origin_verify_sent
@@ -45,7 +45,7 @@ resource "aws_cloudfront_distribution" "main" {
     cache_policy_id          = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
     origin_request_policy_id = "216adef6-5c7f-47e4-b989-5492eafa07d3"
 
-    # AWS 관리형 SecurityHeadersPolicy (HSTS 등 보안 응답 헤더)
+    # AWS 관리형 SecurityHeadersPolicy(HSTS 같은 보안 응답 헤더)
     response_headers_policy_id = "67f7725c-6f97-4210-82d7-5512b31e9d03"
   }
 
@@ -55,7 +55,7 @@ resource "aws_cloudfront_distribution" "main" {
     }
   }
 
-  # ACM 인증서 (us-east-1)
+  # ACM 인증서(us-east-1)
   viewer_certificate {
     acm_certificate_arn      = local.cloudfront_cert_arn
     ssl_support_method       = "sni-only"

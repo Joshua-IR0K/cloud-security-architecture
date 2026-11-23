@@ -1,5 +1,5 @@
-# Okta OIDC 시크릿의 그릇만 구현 
-# 값은 Terraform 밖에서 주입
+# Okta OIDC 시크릿은 그릇만 만든다.
+# 값은 Terraform 밖에서 넣는다.
 
 resource "aws_secretsmanager_secret" "okta_oidc" {
   #checkov:skip=CKV2_AWS_57:자동 로테이션 미적용 — Okta는 서드파티 시크릿으로 AWS 네이티브 로테이션 불가(커스텀 Lambda 필요, 현 단계 과잉). 수동 로테이션 정책으로 운영
@@ -14,7 +14,7 @@ resource "aws_secretsmanager_secret" "okta_oidc" {
     Name = "${var.project_name}-okta-oidc"
   }
 }
-# 값 버전은 Terraform 관리에서 제외 (삭제하지 않음) — 값이 state 에 남지 않도록
+# 값 버전은 Terraform 관리에서 뺀다(삭제는 안 한다). 값이 state에 남지 않게.
 removed {
   from = aws_secretsmanager_secret_version.okta_oidc
 

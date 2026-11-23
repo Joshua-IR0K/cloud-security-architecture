@@ -1,10 +1,10 @@
-# Pod Identity 데모: 전용 버킷 하나로 한정한 역할을 identity-granted 에만 연결한다. 리소스는 모두 04(세션) 스택 지울 때 함께 사라진다.
-# identity-denied 가 S3 호출에 성공하면 IMDS 경로가 열려 노드 역할을 상속했다는 뜻 — hop limit 설정을 의심할 것.
+# Pod Identity 데모: 버킷 하나로 묶은 역할을 identity-granted에만 연결한다. 리소스는 전부 04(세션) 스택을 지울 때 같이 사라진다.
+# identity-denied가 S3 호출에 성공하면 IMDS 경로가 열려서 노드 역할을 물려받았다는 뜻이다. hop limit 설정부터 의심할 것.
 
 resource "aws_s3_bucket" "identity_demo" {
-  # 버킷명은 글로벌 유일 — 계정 ID suffix 로 결정론적 유일성 확보
+  # 버킷 이름은 전역에서 유일해야 해서 계정 ID를 뒤에 붙인다.
   bucket        = "${var.project_name}-s2-identity-demo-${data.aws_caller_identity.current.account_id}"
-  force_destroy = true # 데모 객체가 남아 있어도 destroy 가능 (사이클 규율)
+  force_destroy = true  # 데모 객체가 남아 있어도 destroy할 수 있게(사이클마다 깔끔하게)
 }
 
 resource "aws_s3_bucket_public_access_block" "identity_demo" {
@@ -15,7 +15,7 @@ resource "aws_s3_bucket_public_access_block" "identity_demo" {
   restrict_public_buckets = true
 }
 
-# 데모 버킷도 기본 보안 설정을 적용한다 (CKV_AWS_145·21, CKV2_AWS_61). 암호화는 aws/s3 — 파드는 S3 경유로만 읽어 역할에 KMS 권한이 필요 없음
+# 데모 버킷도 기본 보안 설정을 건다(CKV_AWS_145·21, CKV2_AWS_61). 암호화는 aws/s3. 파드는 S3를 거쳐서만 읽어서 역할에 KMS 권한이 필요 없다.
 resource "aws_s3_bucket_server_side_encryption_configuration" "identity_demo" {
   bucket = aws_s3_bucket.identity_demo.id
 
@@ -35,7 +35,7 @@ resource "aws_s3_bucket_versioning" "identity_demo" {
   }
 }
 
-# 버전이 쌓이지 않게 — 이전 버전·미완료 업로드는 1일 뒤 정리 (force_destroy 와 함께 destroy 도 깨끗하다)
+# 버전이 쌓이지 않게 이전 버전과 미완료 업로드는 1일 뒤 정리한다(force_destroy와 같이 destroy도 깔끔하다).
 resource "aws_s3_bucket_lifecycle_configuration" "identity_demo" {
   bucket = aws_s3_bucket.identity_demo.id
 
@@ -62,12 +62,12 @@ resource "aws_s3_object" "identity_demo_hello" {
   key     = "hello-from-stage2.txt"
   content = "pod identity works - scoped to this bucket only\n"
 
-  # 암호화를 업로드 요청에 직접 지정한다 — 버킷 기본 암호화와 같은 apply 에서 동시에 만들어져 순서에 기댈 수 없음
+  # 암호화를 업로드 요청에 직접 적는다. 버킷 기본 암호화와 같은 apply에서 동시에 만들어져서 순서에 기댈 수 없다.
   server_side_encryption = "aws:kms"
   bucket_key_enabled     = true
 }
 
-# 앱 역할: 버킷 1개 읽기로 한정
+# 앱 역할: 버킷 1개 읽기만
 data "aws_iam_policy_document" "identity_demo_trust" {
   statement {
     effect = "Allow"
@@ -92,7 +92,7 @@ data "aws_iam_policy_document" "identity_demo_read" {
     actions   = ["s3:GetObject"]
     resources = ["${aws_s3_bucket.identity_demo.arn}/*"]
   }
-  # 의도적 부재: s3:ListAllMyBuckets — 전체 목록 조회는 AccessDenied
+  # 일부러 안 준 권한: s3:ListAllMyBuckets. 전체 목록 조회는 AccessDenied가 난다.
 }
 
 resource "aws_iam_role" "identity_demo" {
@@ -106,7 +106,7 @@ resource "aws_iam_role_policy" "identity_demo" {
   policy = data.aws_iam_policy_document.identity_demo_read.json
 }
 
-# 앱 워크로드용 연결 — LBC(인프라 컴포넌트, lb-controller.tf)와 목적 구분
+# 앱 워크로드용 연결. LBC(인프라 컴포넌트, lb-controller.tf)와는 목적이 다르다.
 resource "aws_eks_pod_identity_association" "identity_demo" {
   cluster_name    = module.eks.cluster_name
   namespace       = "default"

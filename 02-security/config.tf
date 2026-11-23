@@ -175,7 +175,7 @@ resource "aws_config_delivery_channel" "main" {
   depends_on = [aws_config_configuration_recorder.main]
 }
 
-# Recorder 와 Delivery Channel 이 모두 준비된 뒤 기록을 시작
+# Recorder와 Delivery Channel이 둘 다 준비된 다음에 기록을 시작한다.
 resource "aws_config_configuration_recorder_status" "main" {
   name       = aws_config_configuration_recorder.main.name
   is_enabled = true

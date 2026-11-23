@@ -1,4 +1,4 @@
-# SSE-S3 — 버킷이 us-east-1(CloudFront WAF 제약)이라 서울 리전 logs 키를 쓸 수 없고, 버킷 하나를 위해 별도 키를 두지 않음
+# SSE-S3를 쓴다. 버킷이 us-east-1(CloudFront WAF 제약)이라 서울 리전 logs 키를 못 쓰고, 버킷 하나 때문에 키를 따로 두지는 않는다.
 
 resource "aws_s3_bucket" "waf_logs" {
   #checkov:skip=CKV_AWS_145:us-east-1 리전 제약 — ap-northeast-2의 logs CMK 사용 불가, 단일 버킷용 별도 CMK는 과잉 운영 부담 (문서화된 결정)
@@ -26,7 +26,7 @@ resource "aws_s3_bucket_public_access_block" "waf_logs" {
   restrict_public_buckets = true
 }
 
-# 버저닝 — 로그 변조 방어 (CKV_AWS_21 대응)
+# 버저닝. 로그 변조를 막는다(CKV_AWS_21 대응).
 resource "aws_s3_bucket_versioning" "waf_logs" {
   provider = aws.us_east_1
   bucket   = aws_s3_bucket.waf_logs.id
@@ -35,7 +35,7 @@ resource "aws_s3_bucket_versioning" "waf_logs" {
   }
 }
 
-# 라이프사이클 — FinOps 티어링 (CKV2_AWS_61 대응)
+# 라이프사이클(FinOps 티어링, CKV2_AWS_61 대응)
 resource "aws_s3_bucket_lifecycle_configuration" "waf_logs" {
   provider = aws.us_east_1
   bucket   = aws_s3_bucket.waf_logs.id
