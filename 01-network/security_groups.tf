@@ -1,22 +1,8 @@
-# ============================================================
-# security_groups.tf — Security Group Chain (Phase 2 업데이트)
-# ============================================================
-#
-# Phase 1 → Phase 2 변경 사항:
-#   ALB SG Inbound: 0.0.0.0/0 → CloudFront Managed Prefix List
-#   → 인터넷에서 ALB에 직접 접근하는 것이 네트워크 레벨에서 차단됨
-#
-# SG Chain:
-#   [CloudFront IP만] → ALB-SG (80/443) → APP-SG (80) → DB-SG (3306)
-#
-# ============================================================
-
-# ── CloudFront Managed Prefix List 조회 ───────────────────
+# CloudFront Managed Prefix List 조회
 data "aws_ec2_managed_prefix_list" "cloudfront" {
   name = "com.amazonaws.global.cloudfront.origin-facing"
 }
 
-# ── ALB Security Group ─────────────────────────────────────
 resource "aws_security_group" "alb" {
   #checkov:skip=CKV2_AWS_5:03-workload 스택의 ALB에 연결됨 — 스택 분리 구조를 정적 스캐너가 인식 못 함
   name        = "${var.project_name}-alb-sg"
@@ -28,9 +14,6 @@ resource "aws_security_group" "alb" {
   }
 }
 
-# ALB Inbound: HTTP — CloudFront Prefix List만 허용
-# ⚠ Phase 1에서는 cidr_blocks = ["0.0.0.0/0"] 이었지만
-#    Phase 2에서 prefix_list_ids로 교체됨
 resource "aws_security_group_rule" "alb_http_in" {
   type              = "ingress"
   from_port         = 80
@@ -41,7 +24,6 @@ resource "aws_security_group_rule" "alb_http_in" {
   description       = "HTTP from CloudFront Managed Prefix List ONLY"
 }
 
-# ALB Inbound: HTTPS — CloudFront Prefix List만 허용
 resource "aws_security_group_rule" "alb_https_in" {
   type              = "ingress"
   from_port         = 443
@@ -52,7 +34,6 @@ resource "aws_security_group_rule" "alb_https_in" {
   description       = "HTTPS from CloudFront Managed Prefix List ONLY"
 }
 
-# ALB Outbound: APP 포트로만 허용
 resource "aws_security_group_rule" "alb_to_app" {
   type                     = "egress"
   from_port                = var.app_port
@@ -63,10 +44,10 @@ resource "aws_security_group_rule" "alb_to_app" {
   description              = "To App instances on app port"
 }
 
-# ALB Outbound: EKS 파드 포트 (3단계 파트 2 — nginx-unprivileged 8080)
-#   ALB egress 는 APP SG 를 향하도록 설계돼 있다(D19). EKS 노드는 APP SG 를 함께 달고 있어
+# ALB Outbound: EKS 파드 포트 (nginx-unprivileged 8080)
+#   ALB egress 는 APP SG 를 향하도록 설계돼 있다. EKS 노드는 APP SG 를 함께 달고 있어
 #   (04 eks.tf vpc_security_group_ids), 파드 IP(노드 ENI 의 보조 IP)로 가는 트래픽도 이 규칙으로 나간다.
-#   ⚠ 이 규칙이 없으면 타깃 등록은 되는데 헬스체크가 Target.Timeout — D19 와 같은 함정.
+#   ⚠ 이 규칙이 없으면 타깃 등록은 되는데 헬스체크가 Target.Timeout.
 #   80(EC2 경로)과 따로 둔다 — 포트 범위(80-8080)로 묶으면 그 사이 전부가 열린다.
 #   인바운드 쪽은 LB Controller 가 TGB networking.ingress 로 노드 SG 에 같은 포트를 연다(05).
 resource "aws_security_group_rule" "alb_to_eks_pods" {
@@ -91,8 +72,6 @@ resource "aws_security_group_rule" "alb_https_out" {
   description       = "HTTPS outbound to Okta Token Endpoint"
 }
 
-
-# ── App (EC2/EKS) Security Group ──────────────────────────
 resource "aws_security_group" "app" {
   #checkov:skip=CKV2_AWS_5:03-workload 스택의 EC2에 연결됨 — 스택 분리 구조를 정적 스캐너가 인식 못 함
   name        = "${var.project_name}-app-sg"
@@ -134,7 +113,6 @@ resource "aws_security_group_rule" "app_http_out" {
   description       = "HTTP outbound via NAT GW (package managers)"
 }
 
-# ── DB Security Group ─────────────────────────────────────
 resource "aws_security_group" "db" {
   #checkov:skip=CKV2_AWS_5:Phase 4B RDS/EKS 데이터 계층 대비 예약 — 의도적 선행 정의
   name        = "${var.project_name}-db-sg"
