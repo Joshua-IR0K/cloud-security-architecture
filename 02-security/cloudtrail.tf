@@ -1,4 +1,3 @@
-# CloudTrail 로그 저장용 S3 버킷
 resource "aws_s3_bucket" "cloudtrail" {
   bucket        = "${var.project_name}-cloudtrail-${data.aws_caller_identity.current.account_id}"
   force_destroy = true
@@ -108,8 +107,8 @@ resource "aws_cloudtrail" "main" {
   name           = "${var.project_name}-trail"
   s3_bucket_name = aws_s3_bucket.cloudtrail.id
 
-  include_global_service_events = true # IAM 등 글로벌 서비스 포함
-  is_multi_region_trail         = true # 모든 리전의 이벤트 수집
+  include_global_service_events = true
+  is_multi_region_trail         = true
   enable_logging                = true
 
   enable_log_file_validation = true

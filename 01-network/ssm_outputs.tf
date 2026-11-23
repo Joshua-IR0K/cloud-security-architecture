@@ -56,7 +56,7 @@ resource "aws_ssm_parameter" "first_public_subnet_id" {
   tags = { Name = "${var.project_name}-first-public-subnet-id" }
 }
 
-# 검증이 끝난 뒤에만 만들어지도록 validation 리소스의 certificate_arn을 사용)
+# 검증이 끝난 뒤에만 만들어지도록 validation 리소스의 certificate_arn을 사용
 resource "aws_ssm_parameter" "acm_cloudfront_cert_arn" {
   name  = "/${var.project_name}/network/acm_cloudfront_cert_arn"
   type  = "String"

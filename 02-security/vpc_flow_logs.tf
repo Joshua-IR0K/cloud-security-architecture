@@ -12,11 +12,11 @@ locals {
 }
 
 resource "aws_flow_log" "vpc_s3" {
-  vpc_id               = local.vpc_id
-  traffic_type         = "ALL"
-  log_destination_type = "s3"
-  log_destination      = aws_s3_bucket.flow_logs.arn
-  log_format           = local.flow_log_format
+  vpc_id                   = local.vpc_id
+  traffic_type             = "ALL"
+  log_destination_type     = "s3"
+  log_destination          = aws_s3_bucket.flow_logs.arn
+  log_format               = local.flow_log_format
   max_aggregation_interval = 600
 
   destination_options {
@@ -33,7 +33,7 @@ resource "aws_flow_log" "vpc_s3" {
 resource "aws_s3_bucket" "flow_logs" {
   bucket        = "${var.project_name}-flow-logs-${data.aws_caller_identity.current.account_id}"
   force_destroy = true
-  tags = { Name = "${var.project_name}-flow-logs" }
+  tags          = { Name = "${var.project_name}-flow-logs" }
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "flow_logs" {
@@ -48,7 +48,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "flow_logs" {
 }
 
 resource "aws_s3_bucket_public_access_block" "flow_logs" {
-  bucket = aws_s3_bucket.flow_logs.id
+  bucket                  = aws_s3_bucket.flow_logs.id
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true

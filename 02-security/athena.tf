@@ -1,21 +1,6 @@
-# 왜 필요한가 — 로그는 쌓이는데 조사 수단이 코드에 없었다
-#   CloudTrail · VPC Flow Logs · WAF 로그를 S3 에 쌓고 있지만 조회 환경이 코드로
-#   관리되지 않아, 같은 조사를 다시 하거나 남에게 보여줄 수 없었다.
-#   WAF 에 Count 로 둔 룰은 볼 수단이 없으면 사실상 없는 룰이다.
-#
-# 설계
-#   · 파티션 프로젝션 — 크롤러·파티션 등록 없이 S3 경로 규칙으로 파티션을 계산한다
-#     → 상시 비용 0 (크롤러 없음, Athena 는 스캔한 만큼만 과금)
-#   · 워크그룹 설정 강제 — 결과 암호화(logs 키)와 쿼리당 스캔 상한(1GB)을 사용자가 끌 수 없다
-#   · 결과 버킷 — 7일 후 만료. 결과에 로그 원문이 섞이므로 KMS 암호화·TLS 강제
-#   · 저장 쿼리 5개 — 조사 절차 자체를 코드로 남긴다 (? 자리는 실행할 때 값을 넣는다)
-#
-# 원본 로그 버킷은 리소스 주소가 아니라 이름 규칙으로 참조한다 (00 plan 역할의
-#   LogBucketExistenceForPlan 과 같은 규칙). 이 파일은 원본 버킷을 읽기만 하고 바꾸지 않는다.
-#
-# ⚠ CI plan 역할 (00): 이 파일의 리소스를 refresh 할 권한이 함께 필요하다.
-#   특히 결과 버킷은 s3:ListBucket 목록에 넣어야 한다 — 빠지면 CI plan 이 버킷을
-#   "없음"으로 보고 재생성을 계획한다 (실제로 겪은 조용한 오판).
+# 로그 조사용 Athena. 파티션 프로젝션이라 크롤러 없이 S3 경로 규칙으로 파티션을 계산한다 (상시 비용 0).
+# 워크그룹 설정(결과 암호화, 쿼리당 스캔 1GB)은 사용자가 끌 수 없다. 원본 로그 버킷은 이름 규칙으로 읽기만 한다.
+# 버킷을 추가하면 00 의 plan 역할 s3:ListBucket 목록에도 넣어야 한다 — 빠지면 CI plan 이 버킷을 없다고 보고 재생성을 계획한다.
 
 data "aws_regions" "athena_trail" {} # 계정에서 활성화된 리전 = 멀티 리전 trail 이 로그를 남기는 범위
 
@@ -111,7 +96,7 @@ resource "aws_athena_workgroup" "security" {
   description = "Security log investigation - encrypted results, 1GB scan cap enforced"
 
   configuration {
-    enforce_workgroup_configuration    = true       # 사용자가 아래 설정을 끌 수 없다
+    enforce_workgroup_configuration    = true # 사용자가 아래 설정을 끌 수 없다
     publish_cloudwatch_metrics_enabled = true
     bytes_scanned_cutoff_per_query     = 1073741824 # 1GB — 넘으면 쿼리 취소 (비용 상한)
 
@@ -380,11 +365,8 @@ resource "aws_glue_catalog_table" "waf_logs" {
   }
 }
 
-# 저장 쿼리 5개 — 조사 절차를 코드로
-# 콘솔: 워크그룹을 이 워크그룹으로 바꾸고 Saved queries 에서 연다. Run 을 누르면 ? 마다 값을 묻는다.
-#   문자열은 작은따옴표로 감싼다 (예: '2026/10/06'). 파티션 값은 모두 UTC 기준.
-#   테이블은 DB 이름까지 적는다 (security_logs.<table>) — 콘솔 편집기는 왼쪽 패널의 Database
-#   선택값(기본 default)으로 실행해서, 이름만 쓰면 TABLE_NOT_FOUND 가 난다 (2026-10-17 확인).
+# 저장 쿼리 5개. 콘솔에서 이 워크그룹을 고른 뒤 Saved queries 에서 실행하고, ? 자리 값은 실행할 때 넣는다 (문자열은 작은따옴표, UTC).
+# 테이블은 security_logs.<table> 처럼 DB 이름까지 쓴다 — 콘솔은 왼쪽에서 고른 DB(기본 default)로 실행해 TABLE_NOT_FOUND 가 난다.
 locals {
   athena_named_queries = {
     "01-waf-requests-by-ip" = {
@@ -536,8 +518,7 @@ resource "aws_athena_named_query" "investigation" {
   workgroup   = aws_athena_workgroup.security.name
   database    = aws_glue_catalog_database.security_logs.name
 
-  # 줄바꿈 정규화 — Windows(CRLF)에서 편집·apply 해도 CI(Linux) plan 과 같은 문자열이 되게 한다.
-  #   HCL heredoc 은 CR 을 그대로 보존하고 query 는 바꾸면 재생성(ForceNew)이라, 줄바꿈만 달라도
-  #   CI plan 이 저장 쿼리 5개 교체를 계획한다. 끝 줄바꿈도 잘라 서비스 쪽 정규화에 흔들리지 않게 한다.
+  # 줄바꿈 정규화 — heredoc 은 CR 을 보존하고 query 는 바뀌면 재생성이라, Windows(CRLF)에서 apply 하면 CI plan 이 저장 쿼리 교체를 계획한다.
+  # 끝 줄바꿈도 잘라 서비스 쪽 정규화에 흔들리지 않게 한다.
   query = trimspace(replace(each.value.query, "\r", ""))
 }

@@ -10,7 +10,7 @@ terraform {
 }
 
 provider "aws" {
-  region  = var.aws_region
+  region = var.aws_region
 
   default_tags {
     tags = {
@@ -25,8 +25,8 @@ provider "aws" {
 
 # WAF 로그 S3 버킷은 us-east-1에 생성 필요
 provider "aws" {
-  alias   = "us_east_1"
-  region  = "us-east-1"
+  alias  = "us_east_1"
+  region = "us-east-1"
 
   default_tags {
     tags = {

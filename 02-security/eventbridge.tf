@@ -15,9 +15,7 @@ resource "aws_sns_topic_subscription" "email" {
   endpoint  = var.alert_email
 }
 
-# GuardDuty Finding → SNS (Medium 이상)
-# GuardDuty 심각도: Low(1-3.9), Medium(4-6.9), High(7-10)
-# Medium 이상만 알림 → 노이즈 감소
+# GuardDuty Finding → SNS (심각도 4 이상, Medium 이상)
 resource "aws_cloudwatch_event_rule" "guardduty_alert" {
   name        = "${var.project_name}-guardduty-medium-high"
   description = "GuardDuty findings with severity Medium or higher"
@@ -110,7 +108,6 @@ resource "aws_cloudwatch_event_target" "inspector_to_sns" {
   arn       = aws_sns_topic.security_alerts.arn
 }
 
-# SNS Topic Policy (EventBridge가 SNS에 발행할 수 있도록)
 resource "aws_sns_topic_policy" "security_alerts" {
   arn = aws_sns_topic.security_alerts.arn
 

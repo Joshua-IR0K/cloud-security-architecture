@@ -1,23 +1,15 @@
-# Key Policy 설계 원칙:
-#   - 모든 키에 "Root 위임" 기본 적용 → IAM Policy로 세부 권한 관리 가능
-#   - AWS 서비스(CloudTrail, Config 등)는 Key Policy에 직접 명시
-#     (KMS는 Key Policy가 최상위 — 여기 없으면 IAM으로도 못 씀)
-
 data "aws_region" "current" {}
 
-# 키 ①: 로그 암호화 키 (S3 로그 버킷용)
-# 용도: CloudTrail, Config, VPC Flow Logs, WAF Logs의 S3 암호화
-#       + EKS 컨트롤 플레인 로그 그룹 (CloudWatch Logs, eks_control_plane_logs.tf)
+# 로그 키 — CloudTrail·Config·Flow Logs 버킷, SNS 토픽, Athena 결과, EKS 감사 로그 그룹 (WAF 로그 버킷은 us-east-1 이라 제외)
 resource "aws_kms_key" "logs" {
   description             = "${var.project_name} - S3 log buckets encryption"
-  deletion_window_in_days = 7     # 삭제 요청 후 7일 대기 (실수 방지)
-  enable_key_rotation     = true  # 연 1회 자동 키 교체
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        # Root 위임 — IAM Policy로 세부 권한 관리 가능하게
         Sid    = "EnableRootAccount"
         Effect = "Allow"
         Principal = {
@@ -27,7 +19,6 @@ resource "aws_kms_key" "logs" {
         Resource = "*"
       },
       {
-        # CloudTrail이 로그를 이 키로 암호화할 수 있도록
         Sid    = "AllowCloudTrail"
         Effect = "Allow"
         Principal = {
@@ -40,7 +31,6 @@ resource "aws_kms_key" "logs" {
         Resource = "*"
       },
       {
-        # Config가 구성 스냅샷을 이 키로 암호화할 수 있도록
         Sid    = "AllowConfig"
         Effect = "Allow"
         Principal = {
@@ -54,7 +44,6 @@ resource "aws_kms_key" "logs" {
         Resource = "*"
       },
       {
-        # VPC Flow Logs 서비스 (delivery.logs.amazonaws.com)
         Sid    = "AllowLogDelivery"
         Effect = "Allow"
         Principal = {
@@ -67,8 +56,7 @@ resource "aws_kms_key" "logs" {
         Resource = "*"
       },
       {
-        # SNS 토픽 암호화용 — EventBridge가 암호화된 토픽에 발행하려면 필수
-        # ⚠ 이 statement 없이 SNS에 CMK를 걸면 알림이 조용히 실패함 (고전 함정)
+        # 없으면 CMK 를 건 SNS 토픽으로 EventBridge 알림이 조용히 실패
         Sid    = "AllowEventBridgeForSNS"
         Effect = "Allow"
         Principal = {
@@ -81,10 +69,7 @@ resource "aws_kms_key" "logs" {
         Resource = "*"
       },
       {
-        # EKS 컨트롤 플레인 로그 그룹 (CloudWatch Logs)
-        # CloudWatch Logs 는 리전 서비스 주체(logs.<region>)로 키를 쓴다.
-        # 암호화 컨텍스트(aws:logs:arn)로 이 로그 그룹 하나에만 한정 —
-        # 같은 계정의 다른 로그 그룹이 이 키를 가져다 쓰지 못한다.
+        # CloudWatch Logs 는 리전 서비스 주체(logs.<region>)로 키를 쓴다. 암호화 컨텍스트(aws:logs:arn)로 EKS 감사 로그 그룹 하나에만 한정
         Sid    = "AllowCloudWatchLogsForEksControlPlane"
         Effect = "Allow"
         Principal = {
@@ -118,8 +103,7 @@ resource "aws_kms_alias" "logs" {
   target_key_id = aws_kms_key.logs.key_id
 }
 
-# 키 ②: 시크릿 암호화 키 (Secrets Manager용)
-# 용도: Secrets Manager에 저장되는 Okta 자격증명 등 암호화
+# 시크릿 키 — Secrets Manager (Okta 자격증명)
 resource "aws_kms_key" "secrets" {
   description             = "${var.project_name} - Secrets Manager encryption"
   deletion_window_in_days = 7
@@ -138,8 +122,7 @@ resource "aws_kms_key" "secrets" {
         Resource = "*"
       },
       {
-        # Secrets Manager를 통한 사용만 허용 (ViaService 조건)
-        # 계정 내 주체가 Secrets Manager 경유로만 이 키를 쓸 수 있음
+        # Secrets Manager 경유로만 사용 (ViaService)
         Sid    = "AllowSecretsManagerUse"
         Effect = "Allow"
         Principal = {
@@ -172,8 +155,7 @@ resource "aws_kms_alias" "secrets" {
   target_key_id = aws_kms_key.secrets.key_id
 }
 
-# 키 ③: EBS 볼륨 암호화 키 (EC2/EKS 워크로드용)
-# 용도: EC2 인스턴스의 EBS 볼륨 암호화 (EKS 노드 포함)
+# EBS 키 — EC2·EKS 노드 볼륨
 resource "aws_kms_key" "ebs" {
   description             = "${var.project_name} - EBS volume encryption"
   deletion_window_in_days = 7
@@ -192,8 +174,6 @@ resource "aws_kms_key" "ebs" {
         Resource = "*"
       },
       {
-        # EC2가 EBS 볼륨 암호화에 이 키를 쓸 수 있도록
-        # (계정 내 주체가 EC2 경유로 사용)
         Sid    = "AllowEC2Use"
         Effect = "Allow"
         Principal = {
@@ -213,11 +193,7 @@ resource "aws_kms_key" "ebs" {
         }
       },
       {
-        # EKS 노드그룹 EBS 암호화
-        # 노드 인스턴스를 실제로 띄우는 주체는 EKS 가 아니라 AWS 관리 ASG.
-        # SLR 은 AWS 관리 정책이 불변이라 IAM 정책 부착이 불가 →
-        # 키 정책에 Principal 로 직접 명시하는 것이 유일한 인가 경로.
-        # (선행조건: asg_slr.tf 의 서비스연결역할 리소스)
+        # 노드 인스턴스를 띄우는 주체는 AWS 관리 ASG 의 SLR 이다. SLR 에는 IAM 정책을 붙일 수 없어 키 정책에 직접 명시한다 (asg_slr.tf)
         Sid    = "AllowASGServiceLinkedRoleUseOfEbsKey"
         Effect = "Allow"
         Principal = {

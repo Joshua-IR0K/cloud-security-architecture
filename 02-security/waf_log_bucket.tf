@@ -1,9 +1,4 @@
-# ⚠ KMS 암호화 미적용 (의도적 결정):
-#   KMS 키는 리전별 리소스. logs CMK는 ap-northeast-2에 있는데
-#   이 버킷은 us-east-1(CloudFront WAF 제약)에 있어 키를 공유 불가.
-#   단일 버킷을 위해 us-east-1 전용 CMK를 따로 관리하는 것은
-#   과한 운영 부담이라 판단 → SSE-S3(AES256) 유지.
-#   프로덕션에서 규제 요구가 있으면 us-east-1 전용 CMK 추가 가능.
+# SSE-S3 — 버킷이 us-east-1(CloudFront WAF 제약)이라 서울 리전 logs 키를 쓸 수 없고, 버킷 하나를 위해 별도 키를 두지 않음
 
 resource "aws_s3_bucket" "waf_logs" {
   #checkov:skip=CKV_AWS_145:us-east-1 리전 제약 — ap-northeast-2의 logs CMK 사용 불가, 단일 버킷용 별도 CMK는 과잉 운영 부담 (문서화된 결정)
@@ -11,7 +6,7 @@ resource "aws_s3_bucket" "waf_logs" {
 
   bucket        = "aws-waf-logs-${var.project_name}-${data.aws_caller_identity.current.account_id}"
   force_destroy = true
-  tags = { Name = "${var.project_name}-waf-logs" }
+  tags          = { Name = "${var.project_name}-waf-logs" }
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "waf_logs" {
@@ -23,8 +18,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "waf_logs" {
 }
 
 resource "aws_s3_bucket_public_access_block" "waf_logs" {
-  provider = aws.us_east_1
-  bucket   = aws_s3_bucket.waf_logs.id
+  provider                = aws.us_east_1
+  bucket                  = aws_s3_bucket.waf_logs.id
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true

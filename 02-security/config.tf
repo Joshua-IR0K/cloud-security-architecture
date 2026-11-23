@@ -58,7 +58,7 @@ resource "aws_s3_bucket_policy" "config" {
         Resource = "${aws_s3_bucket.config.arn}/AWSLogs/${data.aws_caller_identity.current.account_id}/Config/*"
         Condition = {
           StringEquals = {
-            "s3:x-amz-acl"     = "bucket-owner-full-control"
+            "s3:x-amz-acl"      = "bucket-owner-full-control"
             "AWS:SourceAccount" = data.aws_caller_identity.current.account_id
           }
         }
@@ -155,12 +155,12 @@ resource "aws_config_configuration_recorder" "main" {
   role_arn = aws_iam_role.config.arn
 
   recording_group {
-    all_supported                 = true  # 모든 지원 리소스 유형 기록
-    include_global_resource_types = true  # IAM 등 글로벌 리소스 포함
+    all_supported                 = true
+    include_global_resource_types = true
   }
 
   recording_mode {
-    recording_frequency = "CONTINUOUS" # 변경 발생 시 즉시 기록
+    recording_frequency = "CONTINUOUS"
   }
 }
 
@@ -169,14 +169,13 @@ resource "aws_config_delivery_channel" "main" {
   s3_bucket_name = aws_s3_bucket.config.id
 
   snapshot_delivery_properties {
-    delivery_frequency = "Six_Hours" # 6시간마다 전체 스냅샷
+    delivery_frequency = "Six_Hours"
   }
 
   depends_on = [aws_config_configuration_recorder.main]
 }
 
-# Config Recorder 시작
-# Recorder와 Delivery Channel이 모두 준비된 후 기록 시작
+# Recorder 와 Delivery Channel 이 모두 준비된 뒤 기록을 시작
 resource "aws_config_configuration_recorder_status" "main" {
   name       = aws_config_configuration_recorder.main.name
   is_enabled = true

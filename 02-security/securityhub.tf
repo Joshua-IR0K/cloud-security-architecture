@@ -2,11 +2,8 @@ resource "aws_securityhub_account" "main" {
   auto_enable_controls = true
 }
 
-# 보안 표준 활성화
-# ⚠ Config Recorder가 활성화된 후에 표준을 구독해야
-#    보안 점수가 정상 산출됨
+# Config 기록이 켜진 뒤에 구독해야 보안 점수가 정상 산출됨
 
-# CIS AWS Foundations Benchmark v1.4.0
 resource "aws_securityhub_standards_subscription" "cis" {
   standards_arn = "arn:aws:securityhub:${var.aws_region}::standards/cis-aws-foundations-benchmark/v/1.4.0"
 
@@ -16,7 +13,6 @@ resource "aws_securityhub_standards_subscription" "cis" {
   ]
 }
 
-# AWS Foundational Security Best Practices (FSBP)
 resource "aws_securityhub_standards_subscription" "fsbp" {
   standards_arn = "arn:aws:securityhub:${var.aws_region}::standards/aws-foundational-security-best-practices/v/1.0.0"
 
@@ -26,14 +22,12 @@ resource "aws_securityhub_standards_subscription" "fsbp" {
   ]
 }
 
-# GuardDuty → Security Hub 통합
 resource "aws_securityhub_product_subscription" "guardduty" {
   product_arn = "arn:aws:securityhub:${var.aws_region}::product/aws/guardduty"
 
   depends_on = [aws_securityhub_account.main]
 }
 
-# Inspector → Security Hub 통합
 resource "aws_securityhub_product_subscription" "inspector" {
   product_arn = "arn:aws:securityhub:${var.aws_region}::product/aws/inspector"
 
