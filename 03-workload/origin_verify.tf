@@ -1,14 +1,5 @@
-# 왜 필요한가:
-#   이 헤더는 ALB 가 "CloudFront 를 거쳐 온 요청"을 알아보는 표식이다.
-#   ALB SG 의 CloudFront prefix list 는 다른 계정의 배포도 허용하므로 실질 경계는 이 값 하나다.
-#   값이 state 에 남는데 바꾸는 절차가 없으면, 유출됐을 때 손쓸 방법이 없다.
-#
-# 왜 슬롯이 2개인가 — 값 하나를 한 번에 바꾸면 끊긴다:
-#   ALB 규칙은 몇 초 만에 바뀌지만 CloudFront 설정은 엣지에 퍼지는 데 몇 분이 걸린다
-#   (cloudfront.tf 의 wait_for_deployment = true 라 apply 도 그만큼 기다린다).
-#   그 몇 분 동안 옛 값을 보내는 엣지의 요청은 ALB 기본 동작(403)에 걸린다.
-#   → ALB 가 잠시 두 값을 모두 받게 열고(병행) → CloudFront 를 옮긴 뒤 → 옛 값을 닫는다.
-#     (Secrets Manager 회전의 alternating-users 전략과 같은 구조)
+# CloudFront → ALB 출처 확인 헤더. ALB SG 의 CloudFront prefix list 는 다른 계정의 배포도 허용하므로 실질 경계는 이 값이다.
+# 슬롯이 2개인 이유: ALB 규칙은 몇 초, CloudFront 는 엣지 전파에 몇 분이 걸려 한 번에 바꾸면 그사이 403 이 난다 → 병행 열기 → 전환 → 닫기.
 #
 # 교체 절차 (a → b. 03 apply 에 늘 붙이던 -var 들은 그대로 함께 붙인다):
 #   ① 병행 열기 + 새 값 생성
@@ -52,8 +43,7 @@ resource "random_password" "origin_verify_b" {
   special = false
 }
 
-# 기존 단일 값(cloudfront.tf 에 있던 random_password.origin_verify)을 슬롯 a 가 이어받는다
-# — 살아 있는 스택에 적용해도 값이 바뀌지 않는다 (state 가 비어 있으면 아무 일도 하지 않는다)
+# 옛 단일 값(random_password.origin_verify)을 슬롯 a 가 이어받는다 — 살아 있는 스택에서도 값이 바뀌지 않음
 moved {
   from = random_password.origin_verify
   to   = random_password.origin_verify_a

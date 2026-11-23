@@ -1,7 +1,4 @@
-# 발행은 EKS TG ARN 단 하나:
-#   - alb_sg_id 는 발행하지 않음. SG 소유자는 01-network 이고 이미
-#     "/<project>/network/alb_sg_id" 로 발행 중 → 04 가 소유자에게서
-#     직접 읽음 (소유 스택이 발행하고 소비 스택이 조회한다는 원칙)
+# EKS 대상 그룹 ARN 만 발행한다 — ALB SG ID 는 소유자인 01 이 이미 발행하므로 04 가 01 스택에서 읽어야 함
 
 resource "aws_ssm_parameter" "eks_target_group_arn" {
   name  = "/${var.project_name}/workload/eks_target_group_arn"

@@ -46,7 +46,7 @@ resource "aws_iam_instance_profile" "ec2_ssm" {
 }
 
 resource "aws_instance" "web_test" {
-  #checkov:skip=CKV_AWS_126:상세 모니터링 미사용 — CloudWatch 비용 절제 원칙 + Phase 4B에서 EKS로 교체될 임시 리소스
+  #checkov:skip=CKV_AWS_126:EKS 전환 전 경로이자 롤백 대상 EC2 — 상세 모니터링 비용을 들이지 않음
   ami                    = data.aws_ami.amazon_linux.id
   instance_type          = var.ec2_instance_type
   subnet_id              = local.private_subnet_ids[0]

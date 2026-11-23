@@ -1,11 +1,5 @@
-# 왜 Alias 레코드는 workload에 남는가:
-#   레코드의 대상(CloudFront)이 임시 리소스 → "레코드는 자기가
-#   가리키는 리소스와 같은 스택에" 원칙. 영속으로 빼면
-#   영속→임시 참조가 생기고, CloudFront 재생성마다(도메인 변경)
-#   영속 스택 재apply가 강제됨.
+# 레코드는 가리키는 대상(CloudFront)과 같은 세션 스택에 둔다 — 영속 스택에 두면 CloudFront 를 다시 만들 때마다 영속 스택도 다시 apply 해야 함
 
-# 기존 Hosted Zone 조회
-# (01-network에도 동일 data가 있으나, data는 조회일 뿐이라 중복 무해)
 data "aws_route53_zone" "main" {
   name         = var.domain_name
   private_zone = false

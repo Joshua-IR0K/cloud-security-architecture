@@ -10,9 +10,7 @@ resource "aws_nat_gateway" "main" {
   tags = { Name = "${var.project_name}-nat-gw" }
 }
 
-# Private Route Table에 NAT GW 라우팅 추가
-# ⚠ aws_route (개별 라우트) — aws_route_table 내 inline route가 아님
-#    이렇게 해야 이 스택 destroy 시 라우팅만 삭제되고 RT는 유지됨
+# 01 의 프라이빗 라우트 테이블에 개별 aws_route 로 기본 경로를 넣는다 — inline route 가 아니라서 03 을 지워도 라우트 테이블은 남음
 resource "aws_route" "private_nat" {
   route_table_id         = local.private_rt_id
   destination_cidr_block = "0.0.0.0/0"
