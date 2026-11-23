@@ -1,5 +1,5 @@
 repos:
-  # gitleaks — 시크릿 탐지 (커밋에 시크릿 포함 시 차단)
+  # gitleaks. 커밋에 시크릿이 들어가면 막는다.
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2
     hooks:

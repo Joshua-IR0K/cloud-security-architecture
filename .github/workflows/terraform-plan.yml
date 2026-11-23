@@ -1,7 +1,6 @@
-# guard 잡: CI 신원으로 허용·거부 호출을 실제로 시도한다.
-#   통제는 IAM 정책(00, 로컬 apply)이고, 가드는 그 통제가 다시 넓어지는 것을
-#   PR 에서 바로 잡아내는 회귀 탐지다. 가드를 지워도 통제는 남는다.
-# paths 필터를 두지 않는다: 모든 PR 에서 가드가 돌아 경계를 상시 확인한다.
+# guard 잡은 CI 자격으로 허용·거부 호출을 실제로 해 본다.
+# 진짜 통제는 IAM 정책(00, 로컬 apply)이고, 가드는 그 통제가 다시 넓어지면 PR에서 바로 잡아내는 회귀 탐지다. 가드를 지워도 통제는 남는다.
+# paths 필터는 안 둔다. 모든 PR에서 가드가 돌아서 경계를 계속 확인한다.
 
 name: Terraform Plan
 
@@ -10,21 +9,21 @@ on:
     branches: [main]
 
 permissions:
-  id-token: write       # OIDC 토큰 수신
+  id-token: write  # OIDC 토큰 받기
   contents: read        # 레포 체크아웃
-  pull-requests: write  # PR 에 plan 결과 코멘트
+  pull-requests: write  # PR에 plan 결과 코멘트
 
 env:
   AWS_REGION: ap-northeast-2
   PROJECT: devsecops-project
-  # 비민감 변수는 TF_VAR_ 환경변수로 주입 (tfvars 는 git 제외)
+  # 민감하지 않은 변수는 TF_VAR_ 환경변수로 넣는다(tfvars는 git에 안 올림).
   TF_VAR_domain_name: ${{ vars.DOMAIN_NAME }}
 
 jobs:
-  # CI 신원의 권한 경계를 실제 호출로 확인
+  # CI 자격의 권한 경계를 실제 호출로 확인한다
   guard:
     name: Least privilege guard
-    # ubuntu-latest 는 2026-10-19 부터 Ubuntu 26 으로 바뀐다 — 실행 환경이 조용히 바뀌지 않게 버전을 고정한다
+    # ubuntu-latest가 Ubuntu 26으로 바뀌어도 실행 환경이 갑자기 달라지지 않게 버전을 고정한다.
     runs-on: ubuntu-24.04
     steps:
       - name: Configure AWS Credentials (OIDC, plan role)
@@ -34,12 +33,10 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-plan-guard
 
-      # 거부 12 = state·시크릿 경로 8 + 감사 기록 내용 3 + 잠금 쓰기 1
-      #   state·시크릿: 03·05 state · 03 목록 · Okta 시크릿 · CloudFront 설정 2 · ALB 규칙 · WAF 조회
-      #   감사 기록: EKS 감사 로그 읽기 · Logs Insights 쿼리 실행 · Athena 로그 조회
-      # ⚠ S3 거부(03·05 state)는 403 으로 판정한다. ListBucket 이 없으면 객체가 없어도
-      #   403 이 오므로, 이 가드는 "객체가 존재할 때" 의미가 있다(destroy 후에도 state
-      #   객체는 남는다). 객체 존재와 무관한 증명은 정책 시뮬레이터로 했다.
+      # 거부 12개 = state·시크릿 경로 8 + 감사 기록 내용 3 + 잠금 쓰기 1
+      #   state·시크릿: 03·05 state, 03 목록, Okta 시크릿, CloudFront 설정 2, ALB 규칙, WAF 조회
+      #   감사 기록: EKS 감사 로그 읽기, Logs Insights 쿼리 실행, Athena 로그 조회
+      # S3 거부(03·05 state)는 403이면 통과로 본다. ListBucket이 없으면 객체가 없어도 403이 오니까, 객체가 있을 때만 의미가 있다(state 객체는 destroy 후에도 남는다).
       - name: Verify plan role boundary (allow 3 / deny 12)
         run: |
           set -uo pipefail
@@ -53,13 +50,13 @@ jobs:
             echo "::error::가드 준비 실패 — 계정 ID 또는 Okta 시크릿 ARN 을 얻지 못함"
             exit 1
           fi
-          # 존재하지 않는 리소스 식별자 — 권한이 없으면 AccessDenied, 있으면 NotFound 가 온다.
-          # 권한이 다시 열리면 "판정 불가"로 실패하므로 안전한 쪽으로 틀린다.
+          # 존재하지 않는 리소스 식별자를 쓴다. 권한이 없으면 AccessDenied, 있으면 NotFound가 온다.
+          # 권한이 다시 열리면 "판정 불가"로 실패하니까, 틀려도 안전한 쪽으로 틀린다.
           FAKE_CF_ID="E000000GUARD00"
           FAKE_LISTENER="arn:aws:elasticloadbalancing:${AWS_REGION}:${ACCOUNT}:listener/app/guard-probe/0123456789abcdef/0123456789abcdef"
           fail=0
 
-          # 허용이어야 하는 호출 — 성공해야 PASS
+          # 허용돼야 하는 호출. 성공해야 PASS
           allow() {
             local desc="$1"; shift
             if "$@" >/dev/null 2>&1; then
@@ -69,8 +66,8 @@ jobs:
             fi
           }
 
-          # 거부여야 하는 호출 — AccessDenied 또는 403 이어야 PASS
-          #   ⚠ stdout 은 버린다. 권한이 열려 있어도 시크릿·헤더 값이 로그에 남지 않게.
+          # 거부돼야 하는 호출. AccessDenied나 403이어야 PASS
+          #   stdout은 버린다. 권한이 열려 있어도 시크릿이나 헤더 값이 로그에 안 남게.
           deny() {
             local desc="$1"; shift
             local err
@@ -88,8 +85,7 @@ jobs:
             aws s3api head-object --bucket "$BUCKET" --key stacks/01-network/terraform.tfstate
           allow "02 state 읽기" \
             aws s3api head-object --bucket "$BUCKET" --key stacks/02-security/terraform.tfstate
-          # 이 권한이 빠지면 plan 은 실패하지 않고 로그 버킷을 "없음"으로 보고 재생성을 계획한다
-          # (2026-10-12 실제 발생: 23 add / 4 change / 19 destroy). 조용한 오판을 시끄럽게 만든다.
+          # 이 권한이 빠져도 plan은 실패하지 않고, 로그 버킷이 없다고 보고 다시 만들려고 한다. 조용히 틀리는 걸 여기서 시끄럽게 잡는다.
           allow "로그 버킷 존재 확인 (없으면 02 plan 이 '삭제됨'으로 오판)" \
             aws s3api head-bucket --bucket "${PROJECT}-cloudtrail-${ACCOUNT}"
 
@@ -114,23 +110,23 @@ jobs:
             aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1 --limit 1
 
           echo "== 거부 — 감사 기록 내용 =="
-          # plan 에는 로그 그룹 메타데이터 조회만 필요하다. 감사 로그 내용은 "누가 무엇을 했나"
-          # 그 자체라 CI 가 읽으면 안 된다. (그룹이 없어도 권한이 없으면 AccessDenied 가 먼저 온다)
+          # plan에는 로그 그룹 메타데이터 조회만 있으면 된다. 감사 로그 내용은 "누가 뭘 했나" 그 자체라 CI가 읽으면 안 된다.
+          # (그룹이 없어도 권한이 없으면 AccessDenied가 먼저 온다)
           deny "EKS 감사 로그 내용 읽기" \
             aws logs filter-log-events --log-group-name "/aws/eks/joshua-eks/cluster" --limit 1
-          # 저장 쿼리(02 eks_audit_queries.tf)는 plan 이 "정의"만 조회한다. 쿼리 실행은 같은 감사 로그를
-          # 읽는 또 하나의 경로라 막혀 있어야 한다. (최근 1분·1건 — 권한이 열려 있어도 스캔은 미미하다)
+          # 저장 쿼리(02 eks_audit_queries.tf)는 plan이 정의만 조회한다. 쿼리 실행은 같은 감사 로그를 읽는 또 다른 길이라 막혀 있어야 한다.
+          # (최근 1분, 1건이라 권한이 열려 있어도 스캔량은 아주 적다)
           deny "EKS 감사 로그 쿼리 실행 (Logs Insights)" \
             aws logs start-query --log-group-name "/aws/eks/joshua-eks/cluster" \
               --start-time "$(( $(date +%s) - 60 ))" --end-time "$(date +%s)" \
               --query-string "fields @timestamp | limit 1"
-          # Athena 는 CloudTrail·Flow Logs·WAF 를 한 번에 조회하는 경로다. plan 에는 카탈로그·워크그룹
-          # 메타데이터 조회만 필요하다. (SELECT 1 — 권한이 열려 있어도 로그를 스캔하지 않는다)
+          # Athena는 CloudTrail·Flow Logs·WAF를 한 번에 조회하는 길이다. plan에는 카탈로그와 워크그룹 메타데이터 조회만 필요하다.
+          # (SELECT 1이라 권한이 열려 있어도 로그를 스캔하지 않는다)
           deny "Athena 로그 조회 실행" \
             aws athena start-query-execution --work-group "${PROJECT}-security" --query-string "SELECT 1"
 
           echo "== 거부 — 쓰기 =="
-          # 조건식이 항상 거짓이라 권한이 있어도 실제로는 쓰이지 않는다 (부작용 없는 탐침)
+          # 조건식이 항상 거짓이라 권한이 있어도 실제로 써지지는 않는다(부작용 없는 확인용 호출).
           deny "잠금 테이블 쓰기" \
             aws dynamodb put-item --table-name "$LOCK_TABLE" \
               --item '{"LockID":{"S":"guard-probe"}}' \
@@ -146,10 +142,10 @@ jobs:
   plan:
     name: Plan ${{ matrix.stack }}
     needs: guard
-    # ubuntu-latest 는 2026-10-19 부터 Ubuntu 26 으로 바뀐다 — 실행 환경이 조용히 바뀌지 않게 버전을 고정한다
+    # ubuntu-latest가 Ubuntu 26으로 바뀌어도 실행 환경이 갑자기 달라지지 않게 버전을 고정한다.
     runs-on: ubuntu-24.04
 
-    # 각 스택을 병렬 plan (한 스택 실패해도 나머지는 진행)
+    # 스택별로 병렬 plan (한 스택이 실패해도 나머지는 계속 돈다)
     strategy:
       fail-fast: false
       matrix:
@@ -179,13 +175,13 @@ jobs:
         working-directory: ${{ matrix.stack }}
         run: terraform validate
 
-      # -lock=false: CI plan 은 참고용 읽기 전용 → 잠금 테이블에 쓰지 않는다.
-      #   plan 시점 state 가 최신이라는 보장은 하지 않는다.
+      # -lock=false: CI plan은 참고용 읽기라 잠금 테이블에 쓰지 않는다.
+      #   그래서 plan 시점 state가 최신이라는 보장은 없다.
       - name: Terraform Plan
         id: plan
         working-directory: ${{ matrix.stack }}
         run: terraform plan -input=false -no-color -lock=false
-        continue-on-error: true  # 결과 코멘트는 남기고, 마지막 스텝에서 잡을 실패시킨다
+        continue-on-error: true  # 코멘트는 남기고, 잡 실패는 마지막 스텝에서 처리한다
 
       - name: Comment Plan Result
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7.1.0
@@ -203,8 +199,7 @@ jobs:
               body: body
             });
 
-      # 이전엔 continue-on-error 때문에 plan 이 실패해도 체크가 초록으로 끝났다.
-      # → 체크 색이 곧 plan 결과가 되도록 한다.
+      # plan은 continue-on-error로 넘겼으니 여기서 결과를 보고 잡을 실패시킨다. 체크 색이 곧 plan 결과가 되게.
       - name: Fail if plan failed
         if: steps.plan.outcome == 'failure'
         run: |

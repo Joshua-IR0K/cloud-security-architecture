@@ -8,18 +8,11 @@ updates:
       - "dependencies"
       - "github-actions"
 
-  # Terraform Provider 의존성 (스택별)
-  #
-  # 프로바이더 메이저 업그레이드(예: aws 5 → 6)는 리소스 문법·state 변경을 동반한다
-  #   → 자동 PR 로 받지 않고 사람이 계획해서 올린다.
-  # ⚠ update-types(semver-major) 로는 막히지 않는다 — 2026-10-18 실제 확인 (규칙 머지 직후 aws ~> 6.69 PR 재생성):
-  #   Dependabot 은 "~> 5.0" 같은 범위 제약이면 "현재 버전"을 .terraform.lock.hcl 에서 읽는데,
-  #   이 레포는 lock 파일을 커밋하지 않아 현재 버전을 모른다 → 메이저 여부를 판정하지 못해 규칙이 무시된다
-  #   (dependabot-core: terraform file_parser determine_version_for / ignore_condition versions_by_type).
-  #   → 현재 버전과 무관하게 동작하는 버전 범위(versions)로 막는다.
-  #   aws 메이저가 스택마다 달라(01~03 = 5.x, 04·05 = 6.x) 블록을 둘로 나눠 각자 "다음 메이저"만 막는다.
+  # Terraform provider(스택별). 메이저 업그레이드는 문법이나 state가 바뀔 수 있어서 자동 PR로 받지 않는다.
+  # update-types(semver-major)로는 안 막힌다. lock 파일을 커밋하지 않아서 Dependabot이 현재 버전을 모르고, 메이저인지 판단을 못 한다.
+  # 그래서 versions 범위로 다음 메이저만 막는다. aws 메이저가 스택마다 달라서(00~03은 5.x, 04·05는 6.x) 블록을 나눴다.
 
-  # aws 5.x 스택 (00~03) — 01~03 을 6.x 로 올리는 작업을 할 때 이 범위를 ">= 7.0.0" 으로 바꾼다
+  # aws 5.x 스택(00~03). 01~03을 6.x로 올릴 때 이 범위를 ">= 7.0.0"으로 바꾼다.
   - package-ecosystem: "terraform"
     directories:
       - "/00-bootstrap"
@@ -35,7 +28,7 @@ updates:
       - dependency-name: "hashicorp/aws"
         versions: [">= 6.0.0"]
 
-  # aws 6.x 스택 (04·05)
+  # aws 6.x 스택(04·05)
   - package-ecosystem: "terraform"
     directories:
       - "/04-eks"
@@ -48,14 +41,12 @@ updates:
     ignore:
       - dependency-name: "hashicorp/aws"
         versions: [">= 7.0.0"]
-      # kubernetes 프로바이더는 05 스키마를 검증한 3.2.x 로 유지 — 클러스터 세션 실증 뒤 이 줄을 지우고 올린다
+      # kubernetes 프로바이더는 05 스키마를 확인한 3.2.x로 묶어 둔다. 클러스터 세션에서 확인한 뒤 이 줄을 지우고 올린다.
       - dependency-name: "hashicorp/kubernetes"
         versions: [">= 3.3.0"]
 
-  # 컨테이너 베이스 이미지 — 서비스 이미지만
-  #   Dockerfile 의 FROM tag@digest 를 함께 올리는 PR 을 만든다 → 머지 후 CI 의 Trivy 게이트가 검증.
-  #   업스트림이 매주 같은 태그를 재빌드하므로 digest 만 바뀌는 PR 이 주기적으로 오는 게 정상이다.
-  #   images/s5-vuln 은 "의도적으로 낡은" 스캐너 대조군(S5)이라 대상에서 뺀다.
+  # 서비스 베이스 이미지. Dockerfile의 FROM tag@digest를 올리는 PR을 만들고, 머지하면 CI의 Trivy가 검사한다.
+  # 업스트림이 같은 태그를 매주 다시 빌드해서 digest만 바뀐 PR이 주기적으로 오는 게 정상이다. images/s5-vuln은 일부러 낡게 둔 비교용이라 뺀다.
   - package-ecosystem: "docker"
     directory: "/images/s5-good"
     schedule:
@@ -64,7 +55,7 @@ updates:
       - "dependencies"
       - "docker"
     ignore:
-      # nginx 는 짝수 minor = stable, 홀수 = mainline. 패치·digest 갱신만 자동으로 받고
-      # minor 이상(예: 1.30 → 1.31 mainline)은 사람이 stable 여부를 보고 올린다.
+      # nginx는 짝수 minor가 stable, 홀수가 mainline이다. 패치와 digest 갱신만 자동으로 받고
+      # minor 이상(예: 1.30에서 1.31 mainline)은 stable인지 보고 사람이 올린다.
       - dependency-name: "*nginx-unprivileged"
         update-types: ["version-update:semver-minor", "version-update:semver-major"]
