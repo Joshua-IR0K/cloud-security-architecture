@@ -1,48 +1,9 @@
-# ============================================================
-# 00-bootstrap/github_oidc_ver.tf — GitHub Actions OIDC, plan 역할 (장기 키 제거)
-# ============================================================
-#
-# 목적: GitHub Actions가 AWS에 접근할 때 장기 Access Key 없이
-#       OIDC 기반 임시 자격증명을 사용 ("일회용 방문증" 방식)
-#
-# 왜 bootstrap에 두는가:
-#   - 계정 전역 + 영속 리소스 (CI/CD가 모든 스택을 plan)
-#   - 03-workload에 두면 destroy 시 CI/CD가 죽음
-#
-# 방향 A (plan 전용): apply는 로컬 수동, CI는 검증만 → 최소 권한
-#
-# [코드리뷰 반영 이력]
-#   - Trust: StringLike → StringEquals (와일드카드 불필요, 의도 명확화)
-#   - 권한: secretsmanager:GetSecretValue를 특정 시크릿 ARN으로 제한
-#   - 권한: kms:Decrypt를 ViaService 조건으로 제한 (모든 키 → SM 경유만)
-#   - max_session_duration: 3600 유지 (AWS IAM Role 최소값이 3600초)
-#   - prevent_destroy 추가 (영속 리소스 보호)
-#   - plan에 실제 필요한 권한 보강 (events, inspector2, sts, s3 read 등)
-#   - thumbprint: 단일 유지 (AWS가 GitHub thumbprint 무시 → 추가 불필요)
-#   - [A-1, 2026-10] plan 역할 최소권한 재설계 — 멘토 피드백 ②
-#       · 신뢰: pull_request 만 (main 제거 — 미사용 + 측면 이동 경로)
-#       · state: 01·02 두 파일만 읽기 / 목록은 env:/ 접두어만 / 잠금 테이블은 다이제스트 읽기만
-#       · 시크릿 경로 제거: Okta GetSecretValue · KMS Decrypt
-#         + 같은 값을 '설정 조회'로 돌려주는 서비스 제거: CloudFront · ELB · WAF
-#       · 01·02 가 쓰지 않는 서비스 제거: logs / 설정 이력(config:Get*)
-#       · 추가: kms:GetPublicKey — 02 의 aws_kms_public_key 데이터 소스용 (공개키, 비민감, 누락으로 02 plan 실패 확인)
-#       · 추가: 02 로그 버킷 4개의 s3:ListBucket — 버킷 존재 확인용 (없으면 CI 가 '삭제됨'으로 오판)
-#   - [멘토 ⑤, 2026-10] 02 에 EKS 컨트롤플레인 로그 그룹 추가 → 로그 그룹 '메타데이터' 조회만 다시 허용
-#       · logs:DescribeLogGroups · ListTagsForResource · ListTagsLogGroup (로그 내용을 읽는 Get*·Filter* 는 계속 제외)
-#   - [멘토 ③, 2026-10] 02 에 Athena 조사 계층 추가 → 카탈로그·워크그룹 '메타데이터' 조회만 허용
-#       · glue: GetDatabase · GetTable · GetPartitionIndexes · GetTags (security_logs DB 로 한정)
-#       · athena: GetWorkGroup · GetNamedQuery · ListTagsForResource (보안 워크그룹으로 한정)
-#       · 결과 버킷 s3:ListBucket (존재 확인용). 쿼리 실행·결과 읽기는 계속 제외 — 가드가 쿼리 실행 거부를 확인
-#
-# ============================================================
-
 variable "github_repo" {
   description = "GitHub 레포 (owner/repo 형식)"
   type        = string
   default     = "Joshua-IR0K/cloud-security-architecture"
 }
 
-# ── ① OIDC Identity Provider ──────────────────────────────
 resource "aws_iam_openid_connect_provider" "github" {
   url            = "https://token.actions.githubusercontent.com"
   client_id_list = ["sts.amazonaws.com"]
@@ -62,7 +23,6 @@ resource "aws_iam_openid_connect_provider" "github" {
   }
 }
 
-# ── ② Trust Policy ────────────────────────────────────────
 data "aws_iam_policy_document" "github_assume" {
   statement {
     effect  = "Allow"
@@ -73,7 +33,6 @@ data "aws_iam_policy_document" "github_assume" {
       identifiers = [aws_iam_openid_connect_provider.github.arn]
     }
 
-    # 청중(audience) 검증
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:aud"
@@ -82,18 +41,18 @@ data "aws_iam_policy_document" "github_assume" {
 
     # ★ pull_request 만 신뢰한다 (StringEquals — 와일드카드 없음)
     #
-    # [A-1] main ref 를 지운 이유 — 쓰이지 않는데 위험한 경로였다
+    # main ref 를 지운 이유 — 쓰이지 않는데 위험한 경로였다
     #   이 역할을 쓰는 워크플로는 terraform-plan.yml 하나이고 pull_request 에서만 돈다.
     #   신뢰에 main 이 남아 있으면 main 에서 도는 다른 잡(예: build-deploy 의 build 잡)도
     #   이 역할을 수임할 수 있다. id-token 권한이 있는 잡에서는 어떤 스텝이든(서드파티 액션
     #   포함) OIDC 토큰을 새로 받아 sub 가 맞는 역할을 수임할 수 있기 때문이다.
     #
-    # [A-1] GitHub Environment 로 sub 를 핀하지 않은 이유
+    # GitHub Environment 로 sub 를 핀하지 않은 이유
     #   비공개 레포 + Free 요금제에서는 Environment 의 보호 기능(required reviewers,
     #   deployment branches)이 제공되지 않는다. 보호 규칙 없는 Environment 는 아무 브랜치의
     #   잡이나 선언할 수 있으므로 sub 를 environment 로 바꿔도 통제가 생기지 않는다.
     #   → 승인 게이트 대신 "이 역할이 무엇을 읽을 수 있는가"를 줄이는 권한 분리로 방어한다.
-    #   레포 공개 시 적용할 설계: A1 문서 §6 (environment:ci-plan 핀 + required reviewer).
+    #   레포 공개 시 적용할 설계: environment:ci-plan 핀 + required reviewer.
     #
     # [Fork PR] 비공개 레포라 외부인이 fork 할 수 없고, fork PR 은 id-token 권한이
     #   없어 OIDC 토큰을 받지 못한다.
@@ -105,7 +64,6 @@ data "aws_iam_policy_document" "github_assume" {
   }
 }
 
-# ── ③ IAM Role ────────────────────────────────────────────
 resource "aws_iam_role" "github_actions_plan" {
   name                 = "${var.project_name}-github-actions-plan"
   assume_role_policy   = data.aws_iam_policy_document.github_assume.json
@@ -121,16 +79,12 @@ resource "aws_iam_role" "github_actions_plan" {
   }
 }
 
-# ── ④ Plan 전용 권한 정책 ─────────────────────────────────
 data "aws_iam_policy_document" "plan_permissions" {
-  # [A-1] checkov 예외(skip) 없음 — 이전의 CKV_AWS_356(kms:Decrypt 를 "*" 에 허용)·
-  #   CKV_AWS_108 예외가 권한 정리로 불필요해졌다. 예외를 등록하는 대신 없앴다.
 
   # 읽기 — plan 은 현재 상태를 읽어 코드와 비교
   # ※ 대부분의 Describe/List API 는 리소스 수준 제한을 지원하지 않아 resources=["*"] 가 불가피
   #
-  # [A-1] 포함 기준 — "CI 가 plan 하는 01·02 가 실제로 쓰는 서비스만"
-  #   이전 주석은 "읽기 전용이라 시크릿 값 노출 없음"이었으나 틀렸다.
+  # 포함 기준 — "CI 가 plan 하는 01·02 가 실제로 쓰는 서비스만"
   #   조회 API 도 응답에 비밀을 담을 수 있다:
   #     cloudfront:GetDistribution(Config)·ListDistributions → 오리진 헤더 X-Origin-Verify 값
   #     elasticloadbalancing:DescribeRules                   → ALB 규칙 조건의 같은 헤더 값
@@ -191,23 +145,21 @@ data "aws_iam_policy_document" "plan_permissions" {
       "secretsmanager:ListSecrets",
       "secretsmanager:GetResourcePolicy",
       "tag:GetResources",
-      # Stage 5: 02-security ECR repository/lifecycle refresh
+      # 02-security ECR repository/lifecycle refresh
       "ecr:DescribeRepositories",
       "ecr:DescribeImages",
       "ecr:GetLifecyclePolicy",
       "ecr:GetRepositoryPolicy",
       "ecr:GetRegistryScanningConfiguration",
       "ecr:ListTagsForResource",
-      # Stage 6: 02-security CodeBuild project/webhook refresh
+      # 02-security CodeBuild project/webhook refresh
       "codebuild:BatchGetProjects",
       "codebuild:ListProjects"
     ]
     resources = ["*"]
   }
 
-  # [A-1] 02 의 data "aws_kms_public_key"(서명 공개키 → SSM 발행)가 GetPublicKey 를 호출한다.
-  #   기존 정책에 없어 02 plan 이 이 지점에서 실패했다 — AccessDeniedException on
-  #   kms:GetPublicKey (2026-10-06 CI 로그). continue-on-error 때문에 체크는 초록이었다.
+  # 02 의 data "aws_kms_public_key"(서명 공개키 → SSM 발행)가 GetPublicKey 를 호출한다.
   #   공개키라 비민감.
   statement {
     sid       = "KmsGetPublicKeyForDataSource"
@@ -271,12 +223,12 @@ data "aws_iam_policy_document" "plan_permissions" {
     ]
   }
 
-  # 02 로그 버킷 존재 확인 — s3:ListBucket (A-1, 2026-10-12)
+  # 02 로그 버킷 존재 확인 — s3:ListBucket
   #   aws_s3_bucket 의 refresh 는 HeadBucket 으로 버킷 존재를 확인하고, HeadBucket 은
   #   s3:ListBucket 권한을 요구한다. 이 권한이 없을 때 CI plan 은 실패하지 않고 4개 버킷을
   #   "없음"으로 보고 재생성 + 딸린 리소스 15개 교체를 계획했다 (23 add / 4 change / 19 destroy,
   #   로컬 plan 은 No changes). 에러 없이 틀린 plan — 실패보다 위험하다.
-  #   범위: 로그 버킷 4개 + Athena 결과 버킷(멘토 ③). 객체 이름 목록만 보이고 내용(GetObject)은 여전히 막혀 있다.
+  #   범위: 로그 버킷 4개 + Athena 결과 버킷. 객체 이름 목록만 보이고 내용(GetObject)은 여전히 막혀 있다.
   statement {
     sid     = "LogBucketExistenceForPlan"
     effect  = "Allow"
@@ -290,7 +242,7 @@ data "aws_iam_policy_document" "plan_permissions" {
     ]
   }
 
-  # Athena 조사 계층 (02 athena.tf) refresh — 메타데이터만 (멘토 ③, 2026-10)
+  # Athena 조사 계층 (02 athena.tf) refresh — 메타데이터만
   #   provider 5.100.0 의 refresh 가 실제로 부르는 API 만 넣었다:
   #     glue_catalog_database = GetDatabase + GetTags / glue_catalog_table = GetTable + GetPartitionIndexes
   #     athena_workgroup = GetWorkGroup + ListTagsForResource / athena_named_query = GetNamedQuery
@@ -324,7 +276,7 @@ data "aws_iam_policy_document" "plan_permissions" {
     ]
   }
 
-  # ── State 접근 — CI plan 에 필요한 만큼만 (A-1) ──────────────
+  # State 접근 — CI plan 에 필요한 만큼만
   #
   # 스택별 state 민감도 (2026-10 평가):
   #   00  로컬 state (버킷에 없음)                          → 해당 없음
@@ -388,7 +340,7 @@ data "aws_iam_policy_document" "plan_permissions" {
     resources = [aws_dynamodb_table.terraform_lock.arn]
   }
 
-  # ── 시크릿 — 의도적 부재 (A-1) ──────────────────────────────
+  # 시크릿 — 의도적 부재
   # 이전에는 secretsmanager:GetSecretValue(Okta) + kms:Decrypt(SM 경유)가 있었다.
   #   · 03 plan 의 데이터 소스, 02 plan 의 시크릿 버전 refresh 가 이 권한을 썼다.
   #   · 이 권한이 있는 한 PR 에 들어간 코드가 실제 현재 값을 바로 읽을 수 있다.
@@ -396,7 +348,7 @@ data "aws_iam_policy_document" "plan_permissions" {
   #   다시 필요해 보이면 그 plan 을 CI 가 아니라 로컬에서 하는 게 맞다.
 }
 
-# CI plan 이 읽을 수 있는 state — 영속 스택 중 시크릿을 품지 않는 01·02 만 (A-1)
+# CI plan 이 읽을 수 있는 state — 영속 스택 중 시크릿을 품지 않는 01·02 만
 locals {
   plan_state_keys = [
     "stacks/01-network/terraform.tfstate",
@@ -410,7 +362,6 @@ resource "aws_iam_role_policy" "plan_permissions" {
   policy = data.aws_iam_policy_document.plan_permissions.json
 }
 
-# ── 출력 ──────────────────────────────────────────────────
 output "github_actions_role_arn" {
   description = "GitHub Actions 워크플로우에 넣을 Role ARN"
   value       = aws_iam_role.github_actions_plan.arn

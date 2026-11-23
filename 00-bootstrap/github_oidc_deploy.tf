@@ -1,11 +1,3 @@
-# ============================================================
-# 00-bootstrap/github_oidc_deploy.tf — S6-B 배포 전용 역할 (신규)
-# ============================================================
-# 역할 3분할의 마지막 조각:
-#   gha-plan   : Terraform plan (기존, 무변경)
-#   gha-build  : ECR push (S6-A)
-#   gha-deploy : EKS 이미지 롤아웃 (여기)
-#
 # ★ 이 역할의 AWS 권한은 극단적으로 좁다 — eks:DescribeCluster 하나뿐.
 #   Kubernetes 에 대한 실제 권한은 IAM 이 아니라
 #   EKS Access Entry + 네임스페이스 RBAC 이 결정한다(04/05).
@@ -14,7 +6,6 @@
 # ⚠ CodeBuild 러너에서 실행되더라도 AWS 접근은 이 역할(GitHub OIDC)을 쓴다.
 #   CodeBuild 서비스 역할은 러너 배관(VPC ENI/로그/연결)만 담당한다.
 #   두 신원을 혼동하지 않는 것이 S6-B 의 핵심 보안 판단.
-# ============================================================
 
 data "aws_iam_policy_document" "github_assume_deploy" {
   statement {
@@ -61,7 +52,7 @@ resource "aws_iam_role" "github_actions_deploy" {
   }
 }
 
-# ── AWS 권한: kubeconfig 생성에 필요한 최소 ─────────────────
+# AWS 권한: kubeconfig 생성에 필요한 최소
 # aws eks update-kubeconfig 가 DescribeCluster 를 호출한다.
 # 그 외 AWS 권한은 없다 — 클러스터 변경·노드 조작·ECR 접근 모두 불가.
 data "aws_iam_policy_document" "deploy_permissions" {
