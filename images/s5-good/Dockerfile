@@ -12,7 +12,7 @@
 #     tag·digest 를 함께 올린 뒤 CI 의 Trivy 게이트가 검증한다.
 #   · ECR Public 미러 — Docker Hub 익명 pull 의 IP 당 rate limit 회피
 
-FROM public.ecr.aws/nginx/nginx-unprivileged:1.30.7-alpine-slim@sha256:8432c57ac86f178741af2b89948bd9087cb9df1c415bc1ab4d23735c4f0e3e61
+FROM public.ecr.aws/nginx/nginx-unprivileged:1.30.8-alpine-slim@sha256:04c98c78c1de60ddeada00d7d2207dcd146ecd07b61b9941c9a5799cfb258d28
 
 # 패키지 갱신·파일 배치는 root 권한이 필요하다 — 빌드 구간만 root, 마지막에 101 로 되돌린다
 USER root
